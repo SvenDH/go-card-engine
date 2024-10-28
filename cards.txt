@@ -1,0 +1,155 @@
+Soldier {S}
+Unit - Human
+2/1
+
+Grunt {S}
+Unit - Gnome
+Ambush
+1/1
+
+Defensive Stance {1}{S}
+Spell
+Target unit gets +0/+3 and gains "Can't be destroyed by spells" until end of turn.
+
+Swordmaster {S}{S}
+Unit - Human
+When Swordmaster is put on the board, you may activate target Sword unit.
+2/2
+
+Veteran {2}{S}
+Unit - Human
+When Veteran is put on the board, it deals 1 damage to target unit.
+3/2
+
+Farmer {C}
+Unit - Human
+{T}: Add {C}.
+1/1
+
+Healer {C}
+Unit - Human
+{T}: Gain 1 life.
+0/3
+
+Knight {1}{C}
+Unit - Human
+Siege
+2/2
+
+Wings {1}{C}
+Item
+Attune unit
+Attuned unit gains "Fly".
+When attuned unit is destroyed, you may return Wings to your hand.
+
+Shield {1}{C}
+Item
+Attune unit
+Attuned unit gets +0/+2.
+Equip {1}
+
+Mystic {C}{C}
+Unit - Cleric
+{T}: Gain 1 life.
+{C}, {T}: Activate target unit.
+1/3
+
+Bargain {O}
+Spell
+Draw a card. You may play an additional source this turn.
+
+Drain {1}{O}
+Spell
+Destroy target unit. Its controller loses 2 life, and you gain 2 life.
+
+Collector {O}{O}
+Unit - Merchant
+When Collector is put on the board, draw a card for each Coin source you control.
+2/2
+
+Market Crash {2}{O}
+Spell
+Each player sacrifices two sources.
+
+Officer {2}{O}
+Unit
+Siege
+{Q}: Destroy target card.
+1/1
+
+Advisor {W}
+Unit
+{T}: Activate target unit.
+0/2
+
+Blast {W}
+Spell
+Deals 2 damage to target unit.
+
+Fire Mage {1}{W}
+Unit
+{T}: Deals 1 damage to any target.
+1/2
+
+Librarian {1}{W}
+Unit
+When Librarian is put on the board, draw a card.
+1/1
+
+Ethereal Wings {1}{W}
+Spell
+Target unit gains "Fly" until end of turn. Draw a card.
+
+Wanderer {W}{W}
+Unit - Wizard
+{T}: Deal 1 damage to any target.
+{W}, {T}: Deactivate target card.
+2/1
+
+Barrier {2}{W}
+Spell
+Counter target spell. Its controller loses 2 life.
+
+Curse {1}{W}
+Spell
+Destroy target unit. Its controller creates a 1/1 Frog token.
+
+Magic Barrier {2}{W}
+Item
+Whenever your opponent casts a spell, you may pay {1}. If you do, counter that spell.
+
+Time Reversal {3}{W}{W}
+Spell
+Take an extra turn after this one.
+
+Reactor {3}
+Item
+{T}: Add one essence of any type.
+{5}, Sacrifice Essence Reactor: Draw a card for each essence type you've spent this turn.
+
+Fury {3}{S}{W}
+Spell
+Deal 5 damage to target unit. If that unit would be destroyed this turn, exile it instead.
+
+Essence Thief {1}{O}{W}
+Unit - Rogue
+When Essence Thief is put on the board, deactivate target source an opponent controls.
+{T}: Add one essence of any type.
+2/1
+
+Fusion {S}{C}{O}{W}
+Spell
+Choose two -
+- Draw two cards.
+- Deal 3 damage to any target.
+- Gain 4 health.
+- Activate up to two target units.
+
+Surge {X}{S}{C}{O}{W}
+Spell
+Choose X different effects. You may choose the same effect more than once.
+- Deal 2 damage to any target.
+- Gain 3 health.
+- Draw a card.
+- Activate target unit.
+- Deactivate target source.
