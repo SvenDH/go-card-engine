@@ -145,6 +145,6 @@ func (t Trigger) Do(p *Player, a *AbilityInstance) {
 			a.This = p.game.Query(a, t.DealtDamage, nil, -1)
 		}
 	} else if t.Condition != nil {
-		t.Do(p, a)
+		t.Condition.Do(p, a)
 	}
 }

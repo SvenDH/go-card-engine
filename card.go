@@ -72,7 +72,7 @@ type SubType struct {
 "merchant"|
 "cleric"|
 "rogue"|
-"frog"
+"beast"
 )`
 }
 
@@ -308,34 +308,6 @@ func (c *CardInstance) GetTriggeredAbilities() []*Triggered {
 	return abilities
 }
 
-func (b NumberOrX) Format(f fmt.State, c rune) {
-	if b.X {
-		fmt.Fprintf(f, "{X}")
-	} else {
-		fmt.Fprintf(f, "%d", b.Number)
-	}
-}
-func (b CostType) Format(f fmt.State, c rune) {
-	if b.Color != "" {
-		fmt.Fprintf(f, "{%s}", b.Color)
-	} else if b.Activate {
-		fmt.Fprintf(f, "{Q}")
-	} else if b.Deactivate {
-		fmt.Fprintf(f, "{T}")
-	} else {
-		fmt.Fprintf(f, "{%v}", b.Number)
-	}
-}
-func (b Card) Format(f fmt.State, c rune) {
-	fmt.Fprintf(f, "%s %+v", b.Name, b.Costs) // \n%s - %s\n%s\n%s", b.Name, b.Costs, b.Types, b.Subtypes, b.Abilities, b.Stats)
-}
-func (b CardInstance) Format(f fmt.State, c rune) {
-	fmt.Fprintf(f, "%v", b.card)
-}
-func (b Stats) Format(f fmt.State, c rune) {
-	fmt.Fprintf(f, "%v/%v", b.Power, b.Health)
-}
-
 type Attack struct{}
 
 func (f Attack) HasTarget() bool      { return false }
@@ -377,4 +349,32 @@ var WEssenseAbility = createEssenceAbility("w")
 var AttackAbility = &Activated{
 	[]AbilityCost{{Cost: &CostType{Deactivate: true}}},
 	Composed{[]Effect{CardSubjectAbility{nil, []CardEffect{Attack{}}}}},
+}
+
+func (b NumberOrX) Format(f fmt.State, c rune) {
+	if b.X {
+		fmt.Fprintf(f, "{X}")
+	} else {
+		fmt.Fprintf(f, "%d", b.Number)
+	}
+}
+func (b CostType) Format(f fmt.State, c rune) {
+	if b.Color != "" {
+		fmt.Fprintf(f, "{%s}", b.Color)
+	} else if b.Activate {
+		fmt.Fprintf(f, "{Q}")
+	} else if b.Deactivate {
+		fmt.Fprintf(f, "{T}")
+	} else {
+		fmt.Fprintf(f, "{%v}", b.Number)
+	}
+}
+func (b Card) Format(f fmt.State, c rune) {
+	fmt.Fprintf(f, "%s %+v\n%s - %s\n%s\n%s", b.Name, b.Costs, b.Types, b.Subtypes, b.Abilities, b.Stats)
+}
+func (b CardInstance) Format(f fmt.State, c rune) {
+	fmt.Fprintf(f, "%v", b.card)
+}
+func (b Stats) Format(f fmt.State, c rune) {
+	fmt.Fprintf(f, "%v/%v", b.Power, b.Health)
 }

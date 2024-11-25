@@ -35,7 +35,7 @@ type AbilityCost struct {
 }
 
 type Composed struct {
-	Effects []Effect `@@ ((","|".") ("then"|"and")? @@)* "."`
+	Effects []Effect `@@ ("," ("then"|"and")? @@)* "."`
 }
 
 func (f Composed) value() {}

@@ -87,7 +87,7 @@ func TestCardParser(t *testing.T) {
 		{
 			text: `Super Soldier {s}
 			Unit
-			Flying, Siege
+			Fly, Siege
 			{q}: Destroy target card.
 			1/1`,
 			card: &Card{
@@ -95,7 +95,7 @@ func TestCardParser(t *testing.T) {
 				Types: []CardType{{"unit"}},
 				Costs: []CostType{{Color: "s"}},
 				Abilities: []Ability{
-					Keyword{"flying"},
+					Keyword{"fly"},
 					Keyword{"siege"},
 					Activated{
 						Cost: []AbilityCost{
@@ -154,7 +154,7 @@ func TestCardParser(t *testing.T) {
 		{
 			text: `Test {s}{o}{2}
 			Unit - Beast Human
-			Flying, Siege, Poison
+			Fly, Siege, Poison
 			Draw 4 cards.
 			Destroy non-cup units.
 			3/2`,
@@ -168,7 +168,7 @@ func TestCardParser(t *testing.T) {
 					{Number: Two},
 				},
 				Abilities: []Ability{
-					Keyword{"flying"},
+					Keyword{"fly"},
 					Keyword{"siege"},
 					Keyword{"poison"},
 					Composed{
@@ -211,7 +211,7 @@ func TestCardParser(t *testing.T) {
 		{
 			text: `Flashcaster {1}{c}
 			Unit
-			When Flashcaster enters the board, draw a card.
+			When Flashcaster is put on the board, draw a card.
 			1/1`,
 			card: &Card{
 				Name: "Flashcaster",
@@ -222,24 +222,22 @@ func TestCardParser(t *testing.T) {
 				},
 				Abilities: []Ability{
 					Triggered{
-						Trigger: Trigger{
+						Trigger{
 							Condition: &Condition{
 								CardCondition: &CardCondition{
-									Cards: CardMatch{M: []CardTypeMatch{{Self: true}}},
+									Cards: CardMatch{[]CardTypeMatch{{Self: true}}},
 									Enters: true,
 								},
 							},
 						},
-						Effect: Composed{
-							[]Effect{
-								PlayerSubjectAbility{
-									nil, false,
-									[]PlayerEffect{
-										Draw{NumberOrX{}},
-									},
+						Composed{[]Effect{
+							PlayerSubjectAbility{
+								nil, false,
+								[]PlayerEffect{
+									Draw{NumberOrX{A: true}},
 								},
 							},
-						},
+						}},
 					},
 				},
 				Stats: &Stats{One, One},
