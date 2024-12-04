@@ -1,3 +1,7 @@
+Sword
+Source
+{T}: Add {S}.
+
 Soldier {S}
 Unit - Human
 2/1
@@ -39,7 +43,7 @@ Siege
 Wings {1}{C}
 Item
 Attune unit
-Attuned unit gains "Fly".
+Attuned unit gains Fly.
 When attuned unit is destroyed, you may return Wings to your hand.
 
 Shield {1}{C}
