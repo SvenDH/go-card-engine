@@ -35,6 +35,7 @@ type Claims struct {
 
 type TokenResponse struct {
 	AccessToken string `json:"access_token"`
+	Name string `json:"name"`
 }
 
 func GeneratePassword(password string) (string, error) {
@@ -78,7 +79,7 @@ func CreateJWTToken(user *User) (*TokenResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &TokenResponse{accessToken}, nil
+	return &TokenResponse{accessToken, user.Name}, nil
 }
 
 func ValidateToken(tokenString string) (*Claims, error) {

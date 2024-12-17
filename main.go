@@ -1,9 +1,6 @@
 package main
 
 import (
-	_ "embed"
-	"fmt"
-	"strings"
 	"flag"
 	"log"
 	"net/http"
@@ -16,24 +13,6 @@ import (
 )
 
 var addr = flag.String("addr", ":8080", "http service address")
-
-//go:embed cards.txt
-var cardText []byte
-var cards = []*Card{}
-
-var parser = NewCardParser()
-
-func init() {
-	for _, txt := range strings.Split(string(cardText), "\n\n") {
-		card, err := parser.Parse(txt)
-		if err != nil {
-			fmt.Println(err)
-			continue
-		}
-		fmt.Println(card)
-		cards = append(cards, card)
-	}
-}
 
 type LoginUser struct {
 	Username string `json:"username"`

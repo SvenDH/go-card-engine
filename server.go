@@ -2,15 +2,17 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
-	"strings"
 
 	"github.com/gorilla/websocket"
+	"github.com/oklog/ulid/v2"
 )
 
 const (
@@ -19,24 +21,90 @@ const (
 	pingPeriod     = (pongWait * 9) / 10
 	maxMessageSize = 512
 
-	SendMessageAction     = "send-message"
-	JoinRoomAction        = "join-room"
-	LeaveRoomAction       = "leave-room"
-	JoinRoomPrivateAction = "join-room-private"
-	RoomJoinedAction      = "room-joined"
+	SendMessageAction     = "room.message"
+	JoinRoomAction        = "room.join"
+	LeaveRoomAction       = "room.leave"
+	JoinRoomPrivateAction = "room.join-private"
+	RoomJoinedAction      = "room.joined"
+	SinglePlayerAction    = "room.join-npc"
+
+	GameReadyAction   = "game.ready"
+	GameEventAction   = "game.event"
+	GameInfoAction    = "game.info"
+	GamePromptAction  = "game.prompt"
+	GameChoiceAction  = "game.choice"
+	
+	GameCardAction    = "card"
+	GameFieldAction   = "field"
+	GameAbilityAction = "ability"
+	GameTargetAction  = "target"
+	GameDiscardAction = "discard"
 
 	welcomeMessage = "%s joined the room"
 )
 
-var (
-	newline = []byte{'\n'}
-)
+//go:embed cards.txt
+var cardText []byte
+var cards = []*Card{}
+
+var parser = NewCardParser()
+
+type CardPlayer interface {
+	GetName() string
+}
+
+type Bot struct {
+	Name string
+}
+
+func (c *Bot) GetName() string { return c.Name }
+
+func (c *Bot) Card(player *Player, options []*CardInstance) (int, error) {
+	if len(options) == 0 { return SkipCode, nil }
+	return 0, nil
+}
+
+func (c *Bot) Field(player *Player, options []int) (int, error) {
+	if len(options) == 0 { return SkipCode, nil }
+	return 0, nil
+}
+
+func (c *Bot) Ability(player *Player, options []*Activated, card *CardInstance) (int, error) {
+	if len(options) == 0 { return SkipCode, nil }
+	return 0, nil
+}
+
+func (c *Bot) Target(player *Player, options []*CardInstance, num int) ([]int, error) {
+	if len(options) == 0 { return []int{SkipCode}, nil }
+	opts := []int{}
+	for i := range options { opts = append(opts, i) }
+	return opts[:num], nil
+}
+
+func (c *Bot) Discard(player *Player, options []*CardInstance, num int) ([]int, error) {
+	if len(options) == 0 || num == 0 { return []int{SkipCode}, nil }
+	opts := []int{}
+	for i := range options { opts = append(opts, i) }
+	return opts[:num], nil
+}
+
+func init() {
+	for _, txt := range strings.Split(string(cardText), "\n\n") {
+		card, err := parser.Parse(txt)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+		fmt.Println(card)
+		cards = append(cards, card)
+	}
+}
 
 type Message struct {
-	Type    string `json:"type"`
-	Data    string `json:"data"`
-	Target  string `json:"target"`
-	Sender  string `json:"sender"`
+	Type   string `json:"type"`
+	Data   any    `json:"data,omitempty"`
+	Target string `json:"target,omitempty"`
+	Sender string `json:"sender,omitempty"`
 }
 
 func (message *Message) encode() []byte {
@@ -128,14 +196,16 @@ func (b *MemoryBroker) Close() {
 }
 
 type Room struct {
-	Name       string `json:"name"`
+	Name       string
 	server     *Server
 	clients    []*Client
 	register   chan *Client
 	unregister chan *Client
 	broadcast  chan *Message
 	close      chan interface{}
-	game 	   *Game
+	mutex      sync.Mutex
+	game       *Game
+	running    bool
 }
 
 func NewRoom(name string, server *Server) *Room {
@@ -147,16 +217,12 @@ func NewRoom(name string, server *Server) *Room {
 		unregister: make(chan *Client),
 		broadcast:  make(chan *Message),
 		close:      make(chan interface{}),
-		game: 		NewGame(),
+		game:       NewGame(),
 	}
 }
 
 func (room *Room) Run() {
-	
-	//p1 := NewPlayer(cli, cards...)
-	//game := NewGame(p1)
-	//go game.Run()
-
+	room.game.On(AllEvents, room.eventHandler)
 	ch := room.server.broker.Subscribe(context.TODO(), room.Name)
 	go room.subscribeToRoomMessages(ch)
 	for {
@@ -174,19 +240,71 @@ func (room *Room) Run() {
 	}
 }
 
+type GameInfo struct {
+	Players map[string]string `json:"players,omitempty"`
+	Cards []string          `json:"cards,omitempty"`
+	Seen  map[string]string `json:"seen,omitempty"`
+}
+
+type GameEvent struct {
+	Event      string `json:"event"`
+	Subject    string `json:"subject,omitempty"`
+	Source     string `json:"source,omitempty"`
+	Controller string `json:"controller,omitempty"`
+	Index 	   int    `json:"index,omitempty"`
+}
+
+type GameRequest struct {
+	Action  string   `json:"action"`
+	Options []string `json:"options,omitempty"`
+	Num     int      `json:"num,omitempty"`
+	Card    string   `json:"card,omitempty"`
+}
+
+func (room *Room) eventHandler(event *Event) {
+	card, isCard := event.Subject.(*CardInstance)
+	if event.Event == EventOnDraw {
+		for _, client := range room.clients {
+			if client.player == card.Owner {
+				client.sendInfo(&GameInfo{
+					Seen:  map[string]string{card.GetId().String(): card.Card.Name},
+					Cards: []string{card.Card.Text},
+				})
+				break
+			}
+		}
+	}
+
+	e := GameEvent{Event: event.Event.String()}
+	if event.Subject != nil {
+		e.Subject = event.Subject.GetId().String()
+	}
+	if event.Source != nil {
+		e.Source = event.Source.Source.Id.String()
+		e.Controller = event.Source.Controller.GetId().String()
+	} else if isCard {
+		e.Controller = card.Controller.GetId().String()
+	} else {
+		e.Controller = event.Subject.GetId().String()
+	}
+	m := Message{Type: GameEventAction, Data: &e}
+	room.broadcastToClientsInRoom(m.encode())
+}
+
 func (room *Room) Close() {
 	room.close <- struct{}{}
 }
 
 func (room *Room) registerClientInRoom(client *Client) {
 	room.notifyClientJoined(client)
+	room.mutex.Lock()
+	defer room.mutex.Unlock()
 	room.clients = append(room.clients, client)
-
-	client.player = NewPlayer(client)
-	room.game.AddPlayer(client.player)
 }
 
 func (room *Room) unregisterClientInRoom(client *Client) {
+	room.mutex.Lock()
+	defer room.mutex.Unlock()
 	for i, c := range room.clients {
 		if c == client {
 			room.clients = append(room.clients[:i], room.clients[i+1:]...)
@@ -215,107 +333,131 @@ func (room *Room) subscribeToRoomMessages(ch *Subscriber) {
 
 func (room *Room) notifyClientJoined(client *Client) {
 	message := Message{
-		Type:  SendMessageAction,
-		Target:  room.Name,
-		Data: fmt.Sprintf(welcomeMessage, client.Name),
+		Type:   SendMessageAction,
+		Target: room.Name,
+		Data:   fmt.Sprintf(welcomeMessage, client.Name),
 	}
 	room.publishRoomMessage(message.encode())
 }
 
 type Client struct {
-	Name   string `json:"name"`
-	conn   *websocket.Conn
-	server *Server
-	send   chan []byte
-	receive chan int
-	room   *Room
-	player *Player
+	Name    string
+	conn    *websocket.Conn
+	server  *Server
+	send    chan []byte
+	receive chan any
+	room    *Room
+	player  *Player
+	mu      sync.Mutex
 }
 
 func newClient(conn *websocket.Conn, server *Server, name string) *Client {
-	return &Client{
-		Name:   name,
-		conn:   conn,
-		server: server,
-		send:   make(chan []byte, 256),
-		receive: make(chan int, 1),
+	c := &Client{
+		Name:    name,
+		conn:    conn,
+		server:  server,
+		send:    make(chan []byte, 256),
+		receive: make(chan any, 1),
 	}
+	c.player = NewPlayer(c, cards...)
+	return c
 }
 
-func (c *Client) prompt(action string, choices []string) (int, error) {
-	m := Message{Type: action, Data: strings.Join(choices, ","), Target: c.room.Name}
+func (client *Client) GetName() string { return client.Name }
+
+func (client *Client) sendInfo(info *GameInfo) {
+	m := Message{Type: GameInfoAction, Data: info}
+	client.send <- m.encode()
+}
+
+func (c *Client) prompt(action string, choices []string, num int, card string) ([]int, error) {
+	m := Message{
+		Type:   GamePromptAction,
+		Data:   &GameRequest{action, choices, num, card},
+	}
 	c.send <- m.encode()
 	choice := <-c.receive
+	if choice == nil {
+		return []int{SkipCode}, nil
+	}
+	selectedIds, ok := choice.([]any)
+	if !ok {
+		return nil, fmt.Errorf("invalid choice type")
+	}
 	// TODO: handle timeout or other errors
-	return choice, nil
-}
-
-func (c *Client) Card(player *Player, options []*CardInstance) (int, error) {
-	if len(options) == 0 { return -1, nil }
-	choices := []string{}
-	for _, c := range options {
-		choices = append(choices, c.Id.String())
-	}
-	return c.prompt("game.card", choices)
-}
-
-func (c *Client) Field(player *Player, options []int) (int, error) {
-	if len(options) == 0 { return -1, nil }
-	choices := []string{}
-	for _, c := range options {
-		choices = append(choices, fmt.Sprintf("%d", c))
-	}
-	return c.prompt("game.field", choices)
-}
-
-func (c *Client) Ability(player *Player, options []*Activated, card *CardInstance) (int, error) {
-	if len(options) == 0 { return -1, nil }
-	choices := []string{}
-	for i, a := range card.GetActivatedAbilities() {
-		for _, c := range options {
-			if a == c {
-				choices = append(choices, fmt.Sprintf("%s:%d", card.Id.String(), i))
+	selected := []int{}
+	for _, c := range selectedIds {
+		for i, o := range choices {
+			if c == o {
+				selected = append(selected, i)
 				break
 			}
 		}
 	}
-	return c.prompt("game.ability", choices)
+	return selected, nil
+}
+
+func (c *Client) Card(player *Player, options []*CardInstance) (int, error) {
+	if len(options) == 0 {
+		return SkipCode, nil
+	}
+	choices := []string{}
+	for _, c := range options {
+		choices = append(choices, c.Id.String())
+	}
+	result, err := c.prompt(GameCardAction, choices, 0, "")
+	return result[0], err
+}
+
+func (c *Client) Field(player *Player, options []int) (int, error) {
+	if len(options) == 0 {
+		return SkipCode, nil
+	}
+	choices := []string{}
+	for _, c := range options {
+		choices = append(choices, fmt.Sprintf("%d", c))
+	}
+	result, err := c.prompt(GameFieldAction, choices, 0, "")
+	return result[0], err
+}
+
+func (c *Client) Ability(player *Player, options []*Activated, card *CardInstance) (int, error) {
+	if len(options) == 0 {
+		return SkipCode, nil
+	}
+	choices := []string{}
+	for i, a := range card.GetActivatedAbilities() {
+		for _, c := range options {
+			if a == c {
+				choices = append(choices, fmt.Sprintf("%d", i))
+				break
+			}
+		}
+	}
+	result, err := c.prompt(GameAbilityAction, choices, 0, card.Id.String())
+	return result[0], err
 }
 
 func (c *Client) Target(player *Player, options []*CardInstance, num int) ([]int, error) {
-	if len(options) == 0 { return nil, nil }
+	if len(options) == 0 {
+		return []int{SkipCode}, nil
+	}
 	opts := []string{}
 	for _, c := range options {
 		opts = append(opts, c.Id.String())
 	}
-	choices := []int{}
-	for i := 0; i < num; i++ {
-		c, err := c.prompt("game.target", opts)
-		if err != nil {
-			return nil, err
-		}
-		choices = append(choices, c)
-		opts = append(opts[:c], opts[c+1:]...)
-	}
-	return choices, nil
+	return c.prompt(GameTargetAction, opts, num, "")
 }
 
 func (c *Client) Discard(player *Player, options []*CardInstance, num int) ([]int, error) {
-	if len(options) == 0 || num == 0 { return nil, nil }
+	if len(options) == 0 || num == 0 {
+		return []int{SkipCode}, nil
+	}
 	opts := []string{}
 	for _, c := range options {
 		opts = append(opts, c.Id.String())
 	}
-	choices := []int{}
-	for i := 0; i < num; i++ {
-		c, err := c.prompt("game.discard", opts)
-		if err != nil {
-			return nil, err
-		}
-		choices = append(choices, c)
-		opts = append(opts[:c], opts[c+1:]...)
-	}
-	return choices, nil
+	return c.prompt(GameDiscardAction, opts, num, "")
 }
 
 func (client *Client) readPump() {
@@ -360,7 +502,7 @@ func (client *Client) writePump() {
 			// Attach queued messages to the current websocket message.
 			n := len(client.send)
 			for i := 0; i < n; i++ {
-				w.Write(newline)
+				w.Write([]byte{'\n'})
 				w.Write(<-client.send)
 			}
 			if err := w.Close(); err != nil {
@@ -411,47 +553,63 @@ func (client *Client) handleNewMessage(jsonMessage []byte) {
 		return
 	}
 	message.Sender = client.Name
+	client.mu.Lock()
+	defer client.mu.Unlock()
 	switch message.Type {
 	case SendMessageAction:
-		if room := client.server.rooms[message.Target]; room != nil {
+		client.server.mutex.Lock()
+		room := client.server.rooms[message.Target]
+		client.server.mutex.Unlock()
+		if room != nil {
 			room.broadcast <- &message
 		}
 	case JoinRoomAction:
-		client.handleJoinRoomMessage(message)
+		client.handleJoinRoomMessage(&message)
 	case LeaveRoomAction:
-		client.handleLeaveRoomMessage(message)
+		client.handleLeaveRoomMessage(&message)
 	case JoinRoomPrivateAction:
-		client.handleJoinRoomPrivateMessage(message)
+		client.handleJoinRoomPrivateMessage(&message)
+	case SinglePlayerAction:
+		client.handleAddNpc(&message)
+	case GameReadyAction:
+		client.startGame(&message)
+	case GameChoiceAction:
+		client.receive <- message.Data
 	}
 }
 
-func (client *Client) handleJoinRoomMessage(message Message) {
-	client.joinRoom(message.Data, "")
+func (client *Client) handleJoinRoomMessage(message *Message) {
+	client.joinRoom(message.Data.(string), "")
 }
 
-func (client *Client) handleLeaveRoomMessage(message Message) {
-	if room := client.server.rooms[message.Data]; room != nil {
+func (client *Client) handleLeaveRoomMessage(message *Message) {
+	if room := client.server.rooms[message.Data.(string)]; room != nil {
 		client.room = nil
 		room.unregister <- client
 	}
 }
 
-func (client *Client) handleJoinRoomPrivateMessage(message Message) {
-	if target := client.server.repository.FindUserByName(message.Data); target != nil {
-		roomName := message.Data + client.Name
+func (client *Client) handleJoinRoomPrivateMessage(message *Message) {
+	if target := client.server.repository.FindUserByName(message.Data.(string)); target != nil {
+		roomName := ulid.Make().String()
 		if joinedRoom := client.joinRoom(roomName, target.Name); joinedRoom != nil {
 			client.inviteTargetUser(target, joinedRoom)
 		}
 	}
 }
 
-func (client *Client) joinRoom(name, sender string) (room *Room) {
+func (client *Client) joinRoom(name, sender string) *Room {
+	client.server.mutex.Lock()
 	room, ok := client.server.rooms[name]
 	if !ok {
 		room = NewRoom(name, client.server)
+
 		go room.Run()
+
 		client.server.rooms[name] = room
 	}
+	client.server.mutex.Unlock()
+
 	if client.room != room {
 		if client.room != nil {
 			client.room.unregister <- client
@@ -461,22 +619,59 @@ func (client *Client) joinRoom(name, sender string) (room *Room) {
 		m := Message{Type: RoomJoinedAction, Target: room.Name, Sender: sender}
 		client.send <- m.encode()
 	}
-	return
+	return room
+}
+
+func (client *Client) handleAddNpc(message *Message) {
+	roomName := ulid.Make().String()
+	room := client.joinRoom(roomName, message.Sender)
+
+	room.mutex.Lock()
+	defer room.mutex.Unlock()
+
+	room.game.AddPlayer(NewPlayer(&Bot{message.Data.(string)}, cards...))
+}
+
+func (client *Client) startGame(message *Message) {
+	room := client.room
+	room.mutex.Lock()
+	defer room.mutex.Unlock()
+
+	room.game.AddPlayer(client.player)
+
+	if !room.running && len(room.game.players) >= 2 {
+		log.Printf("Starting game in room %s", room.Name)
+		room.running = true
+
+		playerIds := map[string]string{}
+		for _, p := range room.game.players {
+			playerIds[p.GetId().String()] = p.cmdi.(CardPlayer).GetName()
+		}
+		for _, c := range room.clients {
+			c.sendInfo(&GameInfo{Players: playerIds})
+		}
+
+		go room.game.Run()
+	}
 }
 
 func (client *Client) inviteTargetUser(target *User, room *Room) {
-	if c := client.server.clients[target.Name]; c != nil {
+	client.server.mutex.Lock()
+	c := client.server.clients[target.Name]
+	client.server.mutex.Unlock()
+	if c != nil {
 		c.joinRoom(room.Name, client.Name)
 	}
 }
 
 type Server struct {
 	clients    map[string]*Client
+	rooms      map[string]*Room
 	register   chan *Client
 	unregister chan *Client
-	rooms      map[string]*Room
 	repository *Repository
 	broker     Broker
+	mutex      sync.Mutex
 }
 
 func NewWebsocketServer(broker Broker, repository *Repository) *Server {
@@ -502,9 +697,13 @@ func (server *Server) Run() {
 }
 
 func (server *Server) registerClient(client *Client) {
+	server.mutex.Lock()
+	defer server.mutex.Unlock()
 	server.clients[client.Name] = client
 }
 
 func (server *Server) unregisterClient(client *Client) {
+	server.mutex.Lock()
+	defer server.mutex.Unlock()
 	delete(server.clients, client.Name)
 }

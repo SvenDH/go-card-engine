@@ -1,9 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"iter"
 	"math/rand"
-	"fmt"
 	"strings"
 
 	"github.com/alecthomas/participle/v2"
@@ -22,6 +22,7 @@ const (
 	PhaseEnd
 
 	NoEvent EventType = iota
+	AllEvents
 	EventAtStartPhase
 	EventAtDrawPhase
 	EventAtPlayPhase
@@ -53,6 +54,9 @@ const (
 	ZoneBoard
 	ZonePile
 	ZoneStack
+
+	ErrorCode = -1
+	SkipCode  = -2
 )
 
 const boardSize = 5
@@ -67,7 +71,11 @@ type CommandI interface {
 	Discard(*Player, []*CardInstance, int) ([]int, error)
 }
 
-func (phase PhaseType) ToString() string {
+type GameObject interface {
+	GetId() ulid.ULID
+}
+
+func (phase PhaseType) String() string {
 	switch phase {
 	case PhaseStart:
 		return "start"
@@ -79,6 +87,70 @@ func (phase PhaseType) ToString() string {
 		return "end"
 	}
 	return "unknown"
+}
+
+func (e EventType) String() string {
+	switch e {
+	case NoEvent:
+		return "none"
+	case AllEvents:
+		return "all"
+	case EventAtStartPhase:
+		return "start-phase"
+	case EventAtDrawPhase:
+		return "draw-phase"
+	case EventAtPlayPhase:
+		return "play-phase"
+	case EventAtEndPhase:
+		return "end-phase"
+	case EventOnDraw:
+		return "draw"
+	case EventOnPlay:
+		return "play"
+	case EventOnEnterBoard:
+		return "enter-board"
+	case EventOnLeaveBoard:
+		return "leave-board"
+	case EventOnDestroy:
+		return "destroy"
+	case EventOnSacrifice:
+		return "sacrifice"
+	case EventOnTarget:
+		return "target"
+	case EventOnActivate:
+		return "activate"
+	case EventOnDeactivate:
+		return "deactivate"
+	case EventOnAttack:
+		return "attack"
+	case EventOnBlock:
+		return "block"
+	case EventOnDamage:
+		return "damage"
+	case EventOnPlayerDamage:
+		return "player-damage"
+	case EventOnHeal:
+		return "heal"
+	case EventOnCounter:
+		return "counter"
+	case EventOnDiscard:
+		return "discard"
+	case EventOnLoseLife:
+		return "lose-life"
+	case EventOnGainLife:
+		return "gain-life"
+	case EventOnWin:
+		return "win"
+	case EventOnLose:
+		return "lose"
+	}
+	return "unknown"
+}
+
+type Event struct {
+	Event   EventType
+	Source  *AbilityInstance
+	Subject GameObject
 }
 
 type Board struct {
@@ -141,7 +213,7 @@ func (p *Pile) Insert(card *CardInstance, i int) {
 }
 
 type Player struct {
-	Id		   ulid.ULID
+	Id         ulid.ULID
 	game       *Game
 	nr         int
 	life       int
@@ -171,6 +243,60 @@ func NewPlayer(cmdi CommandI, deck ...*Card) *Player {
 	return p
 }
 
+func (p *Player) GetId() ulid.ULID { return p.Id }
+
+func (p *Player) Run() bool {
+	for {
+		selected := []int{0}
+		choices := p.GetPlayableCards()
+		if !p.prompt("card", 1, choices, &selected, nil) || selected[0] < 0 || selected[0] >= len(choices) {
+			return selected[0] == SkipCode
+		}
+		card := choices[selected[0]].(*CardInstance)
+		if card.CanDo() {
+			activatable := card.GetActivatable()
+			if !p.prompt("ability", 1, activatable, &selected, card) {
+				if selected[0] == SkipCode {
+					continue
+				}
+				return false
+			}
+			if selected[0] >= 0 || selected[0] < len(activatable) {
+				a := activatable[selected[0]].(*Activated)
+				e := card.Do(a)
+				if a.IsCost() {
+					e.Resolve()
+				} else {
+					p.game.Play(e)
+				}
+				continue
+			}
+		} else {
+			flipped := card.CanSource()
+			if flipped && card.CanPlay() {
+				if !p.prompt("source", 1, nil, &selected, nil) || selected[0] < 0 {
+					return selected[0] == SkipCode
+				}
+				flipped = selected[0] == 1
+			}
+			fields := p.freeFields(card)
+			if !p.prompt("field", 1, fields, &selected, nil) || selected[0] < 0 {
+				if selected[0] == SkipCode {
+					continue
+				}
+				return false
+			}
+			card.flipped = flipped
+			if flipped {
+				p.game.turn.sourcesPlayed += 1
+				card.Play(fields[selected[0]].(int))
+			} else {
+				p.game.Play(card.Cast(fields[selected[0]].(int)))
+			}
+		}
+	}
+}
+
 func convertArray[T any](arr []any) []T {
 	res := make([]T, len(arr))
 	for i, a := range arr {
@@ -179,78 +305,34 @@ func convertArray[T any](arr []any) []T {
 	return res
 }
 
-func (p *Player) Prompt(
+func (p *Player) prompt(
 	cmd string,
 	num int,
 	choices []any,
 	selected *[]int,
 	context any,
 ) bool {
+	var err error
+	var arr []int
 	if p.cmdi != nil {
 		if cmd == "card" {
-			(*selected)[0], _ = p.cmdi.Card(p, convertArray[*CardInstance](choices))
+			(*selected)[0], err = p.cmdi.Card(p, convertArray[*CardInstance](choices))
 		} else if cmd == "field" {
-			(*selected)[0], _ = p.cmdi.Field(p, convertArray[int](choices))
+			(*selected)[0], err = p.cmdi.Field(p, convertArray[int](choices))
 		} else if cmd == "ability" {
-			(*selected)[0], _ = p.cmdi.Ability(p, convertArray[*Activated](choices), context.(*CardInstance))
+			(*selected)[0], err = p.cmdi.Ability(p, convertArray[*Activated](choices), context.(*CardInstance))
 		} else if cmd == "target" {
-			arr, _ := p.cmdi.Target(p, convertArray[*CardInstance](choices), num)
+			arr, err = p.cmdi.Target(p, convertArray[*CardInstance](choices), num)
 			*selected = append(*selected, arr...)
 		} else if cmd == "discard" {
-			arr, _ := p.cmdi.Discard(p, convertArray[*CardInstance](choices), num)
+			arr, err = p.cmdi.Discard(p, convertArray[*CardInstance](choices), num)
 			*selected = append(*selected, arr...)
 		}
 	}
-	return true
-}
-
-func (p *Player) Do() bool {
-	selected := []int{0}
-	choices := p.GetPlayableCards()
-	if !p.Prompt("card", 1, choices, &selected, nil) ||
-		selected[0] < 0 || selected[0] >= len(choices) {
-		return false
+	if err != nil {
+		(*selected)[0] = ErrorCode
 	}
-	card := choices[selected[0]].(*CardInstance)
-	if card.CanDo() {
-		activatable := card.GetActivatable()
-		if !p.Prompt("ability", 1, activatable, &selected, card) {
-			return false
-		}
-		if selected[0] >= 0 || selected[0] < len(activatable) {
-			a := activatable[selected[0]].(*Activated)
-			e := card.Do(a)
-			if a.IsCost() {
-				e.Resolve()
-			} else {
-				p.game.Play(e)
-			}
-			return true
-		}
-	}
-	flipped := card.CanSource()
-	if flipped && card.CanPlay() {
-		if !p.Prompt("source", 1, nil, &selected, nil) || selected[0] < 0 {
-			return false
-		}
-		flipped = selected[0] == 1
-	}
-	fields := p.freeFields(card)
-	if !p.Prompt("field", 1, fields, &selected, nil) || selected[0] < 0 {
-		return false
-	}
-	card.flipped = flipped
-	if flipped {
-		p.game.turn.sourcesPlayed += 1
-		card.Play(fields[selected[0]].(int))
-	} else {
-		p.game.Play(card.Cast(fields[selected[0]].(int)))
-	}
-	return true
-}
-
-func (p *Player) Run() {
-	for p.Do() {}
+	return err == nil
 }
 
 func (p *Player) GainLife(n int) {
@@ -291,7 +373,7 @@ func (p *Player) Shuffle(zone Zone) {
 }
 
 func (p *Player) Place(card *CardInstance, zone Zone, index int) {
-	card.controller.Remove(card)
+	card.Controller.Remove(card)
 	switch zone {
 	case ZoneDeck:
 		p.deck.Insert(card, index)
@@ -301,7 +383,7 @@ func (p *Player) Place(card *CardInstance, zone Zone, index int) {
 		p.hand.Add(card)
 	case ZoneBoard:
 		p.board.Insert(card, index)
-		card.controller = p
+		card.Controller = p
 		p.game.Emit(EventOnEnterBoard, card)
 	default:
 		panic("Invalid zone")
@@ -366,7 +448,7 @@ func (p *Player) Query(a *AbilityInstance, obj Match, zone *ZoneMatch) []any {
 	}
 	if p.matchField(a, ZoneStack, zone) {
 		for _, card := range p.game.stack.cards {
-			if card.Source.owner == p && (obj == nil || obj.Match(a, card.Source)) {
+			if card.Source.Owner == p && (obj == nil || obj.Match(a, card.Source)) {
 				found = append(found, card.Source)
 			}
 		}
@@ -620,20 +702,24 @@ type Turn struct {
 	sourcesPlayed int
 }
 
+type EventHandler func(*Event)
+
 type Game struct {
-	Id 		     ulid.ULID
-	players      []*Player
-	stack        Stack
-	turn         *Turn
-	currentEvent EventType
-	resolving    *AbilityInstance
+	Id            ulid.ULID
+	players       []*Player
+	stack         Stack
+	turn          *Turn
+	currentEvent  EventType
+	resolving     *AbilityInstance
+	eventHandlers map[EventType][]EventHandler
 }
 
 func NewGame(players ...*Player) *Game {
 	g := &Game{
-		Id:      ulid.Make(),
-		players: players,
-		stack:   Stack{cards: []*AbilityInstance{}},
+		Id:            ulid.Make(),
+		players:       players,
+		stack:         Stack{cards: []*AbilityInstance{}},
+		eventHandlers: map[EventType][]EventHandler{},
 	}
 	for _, player := range g.players {
 		player.game = g
@@ -641,18 +727,52 @@ func NewGame(players ...*Player) *Game {
 	return g
 }
 
+func (g *Game) Run() {
+	if len(g.players) == 0 {
+		panic("No players")
+	}
+	nrPlayers := len(g.players)
+	beginningPlayer := rand.Intn(nrPlayers)
+	for i := 0; i < nrPlayers; i++ {
+		g.players[(beginningPlayer+i)%nrPlayers].nr = i + 1
+	}
+	turn := 1
+	p := g.players[beginningPlayer]
+	for _, player := range g.players {
+		player.life = startLife
+		player.Draw(startCards)
+	}
+	for {
+		g.turn = &Turn{g, p, nil, turn, 0}
+		for phase := range g.turn.Iter() {
+			for player := range phase.Iter() {
+				if !player.Run() {
+					return
+				}
+			}
+		}
+		turn += 1
+		if p.turnsAfter > 0 {
+			p.turnsAfter -= 1
+		} else {
+			p = g.nextPlayer(p)
+		}
+	}
+}
+
 func (g *Game) AddPlayer(p *Player) {
 	g.players = append(g.players, p)
 	p.game = g
 }
 
-type Event struct {
-	Event   EventType
-	Source  any
-	Subject any
+func (g *Game) On(event EventType, handler EventHandler) {
+	if _, ok := g.eventHandlers[event]; !ok {
+		g.eventHandlers[event] = []EventHandler{}
+	}
+	g.eventHandlers[event] = append(g.eventHandlers[event], handler)
 }
 
-func (g *Game) Emit(event EventType, subject any) {
+func (g *Game) Emit(event EventType, subject GameObject, ) {
 	g.currentEvent = event
 	e := &Event{event, g.resolving, subject}
 	for _, player := range g.players {
@@ -663,7 +783,17 @@ func (g *Game) Emit(event EventType, subject any) {
 			}
 		}
 	}
+	g.callHandlers(event, e)
+	g.callHandlers(AllEvents, e)
 	g.currentEvent = NoEvent
+}
+
+func (g *Game) callHandlers(e EventType, event *Event) {
+	if handlers, ok := g.eventHandlers[e]; ok {
+		for _, f := range handlers {
+			f(event)
+		}
+	}
 }
 
 func (g *Game) IsReaction() bool {
@@ -687,7 +817,7 @@ func (g *Game) Pick(a *AbilityInstance, o Match, z *ZoneMatch) []any {
 			return a.Targeting
 		}
 		targeted := []int{}
-		if !a.Controller.Prompt("target", 1, found, &targeted, nil) {
+		if !a.Controller.prompt("target", 1, found, &targeted, nil) {
 			return nil
 		}
 		for _, i := range targeted {
@@ -703,7 +833,7 @@ func (g *Game) Pick(a *AbilityInstance, o Match, z *ZoneMatch) []any {
 				return a.Targeting
 			}
 			targeted := []int{}
-			if !a.Controller.Prompt("target", 1, found, &targeted, nil) {
+			if !a.Controller.prompt("target", 1, found, &targeted, nil) {
 				return nil
 			}
 			for _, i := range targeted {
@@ -731,37 +861,6 @@ func (g *Game) Query(a *AbilityInstance, o Match, z *ZoneMatch, n int) []any {
 		return found[:n]
 	}
 	return found
-}
-
-func (g *Game) Run() {
-	if len(g.players) == 0 {
-		panic("No players")
-	}
-	nrPlayers := len(g.players)
-	beginningPlayer := rand.Intn(nrPlayers)
-	for i := 0; i < nrPlayers; i++ {
-		g.players[(beginningPlayer+i)%nrPlayers].nr = i + 1
-	}
-	turn := 1
-	p := g.players[beginningPlayer]
-	for _, player := range g.players {
-		player.life = startLife
-		player.Draw(startCards)
-	}
-	for {
-		g.turn = &Turn{g, p, nil, turn, 0}
-		for phase := range g.turn.Iter() {
-			for player := range phase.Iter() {
-				player.Run()
-			}
-		}
-		turn += 1
-		if p.turnsAfter > 0 {
-			p.turnsAfter -= 1
-		} else {
-			p = g.nextPlayer(p)
-		}
-	}
 }
 
 func (t *Turn) Iter() iter.Seq[*Phase] {
@@ -875,19 +974,29 @@ func NewCardParser() *CardParser {
 
 func (p *CardParser) Parse(txt string) (*Card, error) {
 	name := strings.TrimSpace(strings.SplitN(strings.SplitN(strings.TrimSpace(txt), "\n", 2)[0], "{", 2)[0])
-	txt = strings.ReplaceAll(strings.ToLower(txt), strings.ToLower(name), "NAME")
-	card, err := p.parser.ParseString("", txt)
+	input := strings.ReplaceAll(strings.ToLower(txt), strings.ToLower(name), "NAME")
+	card, err := p.parser.ParseString("", input)
 	if err != nil {
 		return nil, err
 	}
 	card.Name = name
+	card.Text = txt
 	return card, nil
 }
 
 type NumberOrX struct {
 	Number int  `@Int`
-	A 	   bool `| @("a"|"an")`
+	A      bool `| @("a"|"an")`
 	X      bool `| @"X"`
+}
+
+func (n NumberOrX) String() string {
+	if n.X {
+		return "X"
+	} else if n.A {
+		return "a"
+	}
+	return fmt.Sprintf("%d", n.Number)
 }
 
 func (n NumberOrX) Value(a *AbilityInstance) int {
@@ -904,6 +1013,17 @@ type CostType struct {
 	Activate   bool      `| @"q"`
 	Deactivate bool      `| @"t"`
 	Number     NumberOrX `| @@ )"}"`
+}
+
+func (c CostType) String() string {
+	if c.Color != "" {
+		return fmt.Sprintf("{%s}", c.Color)
+	} else if c.Activate {
+		return "{q}"
+	} else if c.Deactivate {
+		return "{t}"
+	}
+	return c.Number.String()
 }
 
 func (c CostType) Pay(a *AbilityInstance, p *Player) bool {
@@ -990,27 +1110,28 @@ type Card struct {
 	Subtypes  []SubType  `("-" @@*)?`
 	Abilities []Ability  `(@@ (",")?)*`
 	Stats     *Stats     `@@?`
+	Text      string
 }
 
 type CardInstance struct {
-	Id		   ulid.ULID
+	Id         ulid.ULID
 	Card       *Card
 	activated  bool
 	flipped    bool
 	zone       Zone
 	index      int
-	owner      *Player
-	controller *Player
+	Owner      *Player
+	Controller *Player
 	stats      *Stats
 	modifier   []Mods
 }
 
 func NewCardInstance(card *Card, owner *Player, zone Zone) *CardInstance {
 	c := &CardInstance{
-		Id: 	    ulid.Make(),
+		Id:         ulid.Make(),
 		Card:       card,
-		owner:      owner,
-		controller: owner,
+		Owner:      owner,
+		Controller: owner,
 		zone:       zone,
 		modifier:   []Mods{},
 	}
@@ -1018,6 +1139,18 @@ func NewCardInstance(card *Card, owner *Player, zone Zone) *CardInstance {
 		c.stats = &Stats{card.Stats.Power, card.Stats.Health}
 	}
 	return c
+}
+
+func (c *CardInstance) GetId() ulid.ULID { return c.Id }
+
+func (c *CardInstance) GetName() string { return c.Card.Name }
+
+func (c *CardInstance) GetPower() NumberOrX {
+	return c.stats.Power
+}
+
+func (c *CardInstance) GetHealth() NumberOrX {
+	return c.stats.Health
 }
 
 func (c *CardInstance) GetActivatable() []any {
@@ -1033,40 +1166,40 @@ func (c *CardInstance) GetActivatable() []any {
 func (c *CardInstance) TakeDamage(n int) {
 	// TODO: check for protection of source
 	c.stats.Health.Number -= n
-	c.owner.game.Emit(EventOnDamage, c)
+	c.Owner.game.Emit(EventOnDamage, c)
 	if c.stats.Health.Number <= 0 {
 		// TODO: check invurnability
-		c.controller.Remove(c)
-		c.owner.Place(c, ZonePile, -1)
-		c.owner.game.Emit(EventOnDestroy, c)
+		c.Controller.Remove(c)
+		c.Owner.Place(c, ZonePile, -1)
+		c.Owner.game.Emit(EventOnDestroy, c)
 	}
 }
 
 func (c *CardInstance) Activate() {
 	c.activated = true
-	c.owner.game.Emit(EventOnActivate, c)
+	c.Owner.game.Emit(EventOnActivate, c)
 }
 
 func (c *CardInstance) Deactivate() {
 	c.activated = false
-	c.owner.game.Emit(EventOnDeactivate, c)
+	c.Owner.game.Emit(EventOnDeactivate, c)
 }
 
 func (c *CardInstance) Do(a *Activated) *AbilityInstance {
-	player := c.owner.game.turn.phase.priority
+	player := c.Owner.game.turn.phase.priority
 	player.Pay(c, a.Cost)
 	return a.Do(player, c)
 }
 
 func (c *CardInstance) Play(index int) {
 	c.activated = true
-	player := c.owner.game.turn.phase.priority
+	player := c.Owner.game.turn.phase.priority
 	player.Place(c, ZoneBoard, index)
 	player.game.Emit(EventOnPlay, c)
 }
 
 func (c *CardInstance) Cast(index int) *AbilityInstance {
-	player := c.owner.game.turn.phase.priority
+	player := c.Owner.game.turn.phase.priority
 	player.Remove(c)
 	player.Pay(c, c.GetCosts())
 	return &AbilityInstance{Source: c, Controller: player, Field: index}
@@ -1074,16 +1207,16 @@ func (c *CardInstance) Cast(index int) *AbilityInstance {
 
 func (c *CardInstance) Trigger(event *Event) {
 	for _, t := range c.GetTriggeredAbilities() {
-		a := t.Do(c.controller, c)
+		a := t.Do(c.Controller, c)
 		if a != nil {
-			c.controller.game.Play(a)
+			c.Controller.game.Play(a)
 		}
 	}
 }
 
 func (c *CardInstance) CanDo() bool {
 	for _, a := range c.GetActivatedAbilities() {
-		if a.CanDo(c) && (a.IsCost() || !c.owner.game.IsReaction()) {
+		if a.CanDo(c) && (a.IsCost() || !c.Owner.game.IsReaction()) {
 			return true
 		}
 	}
@@ -1092,7 +1225,7 @@ func (c *CardInstance) CanDo() bool {
 
 func (c *CardInstance) CanReact() bool {
 	// TODO: check if card can react or instant
-	return c.owner.game.turn.player == c.owner && !c.owner.game.IsReaction()
+	return c.Owner.game.turn.player == c.Owner && !c.Owner.game.IsReaction()
 }
 
 func (c *CardInstance) CanPlay() bool {
@@ -1100,14 +1233,14 @@ func (c *CardInstance) CanPlay() bool {
 	if c.zone != ZoneHand || !c.CanReact() {
 		return false
 	}
-	return c.owner.game.turn.phase.priority.CanPay(c, c.GetCosts())
+	return c.Owner.game.turn.phase.priority.CanPay(c, c.GetCosts())
 }
 
 func (c *CardInstance) CanSource() bool {
 	if c.zone != ZoneHand || !c.CanReact() {
 		return false
 	}
-	t := c.owner.game.turn
+	t := c.Owner.game.turn
 	return t.sourcesPlayed >= t.phase.priority.SourcesPerTurn()
 }
 
@@ -1201,8 +1334,8 @@ func (f Attack) Resolve(e *EffectInstance) {
 	for _, c := range e.Subjects {
 		card := c.(*CardInstance)
 		var o *Player
-		for _, p := range card.controller.game.players {
-			if p != card.controller {
+		for _, p := range card.Controller.game.players {
+			if p != card.Controller {
 				o = p
 			}
 		}
@@ -1218,7 +1351,7 @@ func (f Attack) Resolve(e *EffectInstance) {
 
 func createEssenceAbility(color string) *Activated {
 	return &Activated{
-		[]AbilityCost{{Cost:&CostType{Deactivate: true}}},
+		[]AbilityCost{{Cost: &CostType{Deactivate: true}}},
 		Composed{[]Effect{PlayerSubjectAbility{
 			nil, false, []PlayerEffect{Add{[]CostType{{Color: color}}}},
 		}}},
@@ -1302,7 +1435,7 @@ func (f Composed) IsCost() bool {
 }
 
 type CardSubjectAbility struct {
-	Match   *CardMatch    `@@?`
+	Match   *CardMatch   `@@?`
 	Effects []CardEffect `@@ ((",") ("then"|"and")? @@)*`
 }
 
@@ -1343,9 +1476,9 @@ func (f CardSubjectAbility) Do(e *EffectInstance) {
 func (f CardSubjectAbility) Resolve(e *EffectInstance) {}
 
 type PlayerSubjectAbility struct {
-	Match   *PlayerMatch   `(@@`
-	Optional bool          `@("may")? )?`
-	Effects []PlayerEffect `@@ ((",") ("then"|"and")? @@)*`
+	Match    *PlayerMatch   `(@@`
+	Optional bool           `@("may")? )?`
+	Effects  []PlayerEffect `@@ ((",") ("then"|"and")? @@)*`
 }
 
 func (f PlayerSubjectAbility) HasTarget() bool {
@@ -1401,7 +1534,7 @@ func (f Activated) CanDo(card *CardInstance) bool {
 		// TOOO: check if card can activate from other locations
 		return false
 	}
-	return card.controller.CanPay(card, f.Cost)
+	return card.Controller.CanPay(card, f.Cost)
 }
 
 func (f *Activated) Do(p *Player, c *CardInstance) *AbilityInstance {
@@ -1483,11 +1616,11 @@ type Condition struct {
 
 func (c Condition) Match(a *AbilityInstance, o *CardInstance) bool {
 	if c.YourTurn {
-		if a.Controller != a.Source.owner.game.turn.player {
+		if a.Controller != a.Source.Owner.game.turn.player {
 			return false
 		}
 	} else if c.NotYourTurn {
-		if a.Controller == a.Source.owner.game.turn.player {
+		if a.Controller == a.Source.Owner.game.turn.player {
 			return false
 		}
 	} else if c.PlayerCondition != nil {
@@ -1707,7 +1840,7 @@ func (c Compare) Compare(a *AbilityInstance, val int) bool {
 }
 
 type With struct {
-	Ability []Keyword    `"with" ( (@@ (("," @@)* "and" @@)?)`
+	Ability []Keyword   `"with" ( (@@ (("," @@)* "and" @@)?)`
 	Number  *Numberical `| (@@`
 	Compare *Compare    `@@))`
 }
@@ -1821,9 +1954,9 @@ func (c CardMatch) Match(a *AbilityInstance, o any) bool {
 }
 
 type PlayerTypeMatch struct {
-	Each     bool `@("each" "player")`
-	Self     bool `| @("you")`
-	Opponent bool `| @("your" "opponent")`
+	Each       bool `@("each" "player")`
+	Self       bool `| @("you")`
+	Opponent   bool `| @("your" "opponent")`
 	Controller bool `| @("its" "controller")`
 }
 
@@ -1852,7 +1985,7 @@ func (c PlayerTypeMatch) Match(a *AbilityInstance, o any) bool {
 		}
 	} else if c.Controller {
 		for _, c := range a.This {
-			if c.(*CardInstance).controller == p {
+			if c.(*CardInstance).Controller == p {
 				return true
 			}
 		}
@@ -2007,8 +2140,8 @@ func (f Destroy) Do(a *EffectInstance) {
 func (f Destroy) Resolve(e *EffectInstance) {
 	for _, c := range e.matches {
 		card := c.(*CardInstance)
-		card.owner.Place(card, ZonePile, -1)
-		card.owner.game.Emit(EventOnDestroy, card)
+		card.Owner.Place(card, ZonePile, -1)
+		card.Owner.game.Emit(EventOnDestroy, card)
 	}
 }
 
@@ -2072,13 +2205,13 @@ func (f Discard) Resolve(e *EffectInstance) {
 	n := f.Number.Value(e.Ability)
 	for _, p := range e.Subjects {
 		choices := []int{}
-		if !p.(*Player).Prompt("discard", n, e.matches, &choices, nil) {
+		if !p.(*Player).prompt("discard", n, e.matches, &choices, nil) {
 			return
 		}
 		for _, i := range choices {
 			card := e.matches[i].(*CardInstance)
-			card.owner.Place(card, ZonePile, -1)
-			card.owner.game.Emit(EventOnDiscard, card)
+			card.Owner.Place(card, ZonePile, -1)
+			card.Owner.game.Emit(EventOnDiscard, card)
 		}
 	}
 }
@@ -2096,7 +2229,7 @@ func (f Shuffle) Resolve(e *EffectInstance) {
 	zone := e.zones[0]
 	for _, c := range e.matches {
 		card := c.(*CardInstance)
-		card.owner.Place(card, zone, -1)
+		card.Owner.Place(card, zone, -1)
 	}
 	for _, p := range e.Subjects {
 		p.(*Player).Shuffle(zone)
@@ -2128,7 +2261,7 @@ func (f Look) Resolve(e *EffectInstance) {
 	n := f.Number.Value(e.Ability)
 	for _, p := range e.Subjects {
 		cards := p.(*Player).Query(e.Ability, nil, f.Zone)
-		p.(*Player).Prompt("look", n, cards[:n], nil, nil)
+		p.(*Player).prompt("look", n, cards[:n], nil, nil)
 	}
 }
 
@@ -2150,7 +2283,7 @@ func (f Put) Resolve(e *EffectInstance) {
 	zone := e.zones[0]
 	for _, c := range e.matches {
 		card := c.(*CardInstance)
-		card.owner.Place(card, zone, -1)
+		card.Owner.Place(card, zone, -1)
 		if f.Deactivated {
 			card.Deactivate()
 		}
@@ -2193,8 +2326,8 @@ func (f Sacrifice) Do(a *EffectInstance) { a.Match = f.Objects }
 func (f Sacrifice) Resolve(e *EffectInstance) {
 	for _, c := range e.matches {
 		card := c.(*CardInstance)
-		card.owner.Place(card, ZonePile, -1)
-		card.owner.game.Emit(EventOnSacrifice, card)
+		card.Owner.Place(card, ZonePile, -1)
+		card.Owner.game.Emit(EventOnSacrifice, card)
 	}
 }
 
