@@ -93,6 +93,10 @@ export default class Game extends Phaser.Scene {
 			}
 			for (const prop in message.seen || {}) {
 				this.seen[prop] = this.cards[message.seen[prop]];
+				if (this.cardInstances[prop]) {
+					this.cardInstances[prop].setCardName(this.seen[prop].name);
+					// TODO: avatar
+				}
 			}
 		});
 
@@ -112,7 +116,7 @@ export default class Game extends Phaser.Scene {
 				this.players[message.controller].hand.addCard(card);
 			} else if (message.event === 'enter-board') {
 				let card = this.cardInstances[message.subject];
-				this.players[message.controller].board.addCard(message.zone, card);
+				this.players[message.controller].board.addCard(message.args[0], card);
 			}
 		});
 

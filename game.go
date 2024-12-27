@@ -151,6 +151,7 @@ type Event struct {
 	Event   EventType
 	Source  *AbilityInstance
 	Subject GameObject
+	Args   []any
 }
 
 type Board struct {
@@ -384,7 +385,7 @@ func (p *Player) Place(card *CardInstance, zone Zone, index int) {
 	case ZoneBoard:
 		p.board.Insert(card, index)
 		card.Controller = p
-		p.game.Emit(EventOnEnterBoard, card)
+		p.game.Emit(EventOnEnterBoard, card, index)
 	default:
 		panic("Invalid zone")
 	}
@@ -772,9 +773,9 @@ func (g *Game) On(event EventType, handler EventHandler) {
 	g.eventHandlers[event] = append(g.eventHandlers[event], handler)
 }
 
-func (g *Game) Emit(event EventType, subject GameObject, ) {
+func (g *Game) Emit(event EventType, subject GameObject, args ...any) {
 	g.currentEvent = event
-	e := &Event{event, g.resolving, subject}
+	e := &Event{event, g.resolving, subject, args}
 	for _, player := range g.players {
 		// TODO: Check cards in other zones
 		for _, card := range player.board.slots {

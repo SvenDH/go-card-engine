@@ -32,6 +32,7 @@ export default class Board extends Phaser.GameObjects.Group {
 		card.index = index;
 		card.location = 'field';
 		card.setDepth(0);
+		card.setFaceup(true);
 
 		let zone = this.zones[index];
 		this.scene.tweens.add({

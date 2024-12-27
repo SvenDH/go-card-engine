@@ -251,7 +251,7 @@ type GameEvent struct {
 	Subject    string `json:"subject,omitempty"`
 	Source     string `json:"source,omitempty"`
 	Controller string `json:"controller,omitempty"`
-	Index 	   int    `json:"index,omitempty"`
+	Args 	   []any  `json:"args,omitempty"`
 }
 
 type GameRequest struct {
@@ -263,19 +263,18 @@ type GameRequest struct {
 
 func (room *Room) eventHandler(event *Event) {
 	card, isCard := event.Subject.(*CardInstance)
-	if event.Event == EventOnDraw {
+	if event.Event == EventOnDraw || event.Event == EventOnEnterBoard {
 		for _, client := range room.clients {
-			if client.player == card.Owner {
+			if client.player == card.Owner || event.Event == EventOnEnterBoard {
 				client.sendInfo(&GameInfo{
 					Seen:  map[string]string{card.GetId().String(): card.Card.Name},
 					Cards: []string{card.Card.Text},
 				})
-				break
 			}
 		}
 	}
 
-	e := GameEvent{Event: event.Event.String()}
+	e := GameEvent{Event: event.Event.String(), Args: event.Args}
 	if event.Subject != nil {
 		e.Subject = event.Subject.GetId().String()
 	}

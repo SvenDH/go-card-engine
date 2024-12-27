@@ -85,7 +85,12 @@ export default class Card extends Phaser.GameObjects.Container {
 				this.setActive(this.isActive);
 			}
 		}, this);
-   }
+    }
+
+    setCardName(value) {
+		this.textName.setText(value);
+		this.cardname = value;
+	}
 
 	setActive(isActive) {
 		this.isActive = isActive;
