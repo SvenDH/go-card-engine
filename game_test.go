@@ -85,6 +85,7 @@ func TestCardParser(t *testing.T) {
 									},
 								},
 							},
+							"",
 						},
 					},
 				},
@@ -115,7 +116,7 @@ func TestCardParser(t *testing.T) {
 										Destroy{&TargetCard},
 									},
 								},
-							},
+							}, "",
 						},
 					},
 				},
@@ -151,6 +152,7 @@ func TestCardParser(t *testing.T) {
 									},
 								},
 							},
+							"",
 						},
 					},
 				},
@@ -185,7 +187,7 @@ func TestCardParser(t *testing.T) {
 									Draw{NumberOrX{Number: 4}},
 								},
 							},
-						},
+						}, "",
 					},
 					Composed{
 						[]Effect{
@@ -207,7 +209,7 @@ func TestCardParser(t *testing.T) {
 									},
 								},
 							},
-						},
+						}, "",
 					},
 
 				},
@@ -243,7 +245,8 @@ func TestCardParser(t *testing.T) {
 									Draw{NumberOrX{A: true}},
 								},
 							},
-						}},
+						}, ""},
+						"",
 					},
 				},
 				Stats: &Stats{One, One},
@@ -252,7 +255,7 @@ func TestCardParser(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		card, err := parser.Parse(test.text)
+		card, err := parser.Parse(test.text, false)
 		if err != nil {
 			t.Errorf("Error parsing card: %v", err)
 		}
@@ -336,7 +339,7 @@ func TestGamePhases(t *testing.T) {
 				t.Fatalf("Deck size not 1")
 			} else if len(p1.hand.cards) != 1 {
 				t.Fatalf("Hand does not contain card")
-			} else if p1.hand.cards[0].card.Name != "card2" {
+			} else if p1.hand.cards[0].Card.Name != "card2" {
 				t.Fatalf("Hand does not contain top card from deck")
 			}
 		case PhasePlay:
@@ -348,7 +351,7 @@ func TestGamePhases(t *testing.T) {
 			if len(game.stack.cards) != 1 {
 				t.Fatalf("Stack size not 1")
 			}
-			if game.stack.cards[0].Source.card.Name != "card2" {
+			if game.stack.cards[0].Source.Card.Name != "card2" {
 				t.Fatalf("Stack does not contain card from hand")
 			}
 			a2 := game.stack.Pop()
@@ -356,7 +359,7 @@ func TestGamePhases(t *testing.T) {
 				t.Fatalf("Ability not the cast card")
 			}
 			a2.Resolve()
-			if p1.board.slots[1].card.Name != "card2" {
+			if p1.board.slots[1].Card.Name != "card2" {
 				t.Fatalf("Board does not contain card from hand")
 			}
 		case PhaseEnd:
@@ -397,6 +400,7 @@ func TestTrigger(t *testing.T) {
 							},
 						},
 					},
+					"",
 				},
 			},
 		},

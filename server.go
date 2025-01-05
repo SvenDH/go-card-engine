@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -28,12 +29,12 @@ const (
 	RoomJoinedAction      = "room.joined"
 	SinglePlayerAction    = "room.join-npc"
 
-	GameReadyAction   = "game.ready"
-	GameEventAction   = "game.event"
-	GameInfoAction    = "game.info"
-	GamePromptAction  = "game.prompt"
-	GameChoiceAction  = "game.choice"
-	
+	GameReadyAction  = "game.ready"
+	GameEventAction  = "game.event"
+	GameInfoAction   = "game.info"
+	GamePromptAction = "game.prompt"
+	GameChoiceAction = "game.choice"
+
 	GameCardAction    = "card"
 	GameFieldAction   = "field"
 	GameAbilityAction = "ability"
@@ -60,37 +61,51 @@ type Bot struct {
 func (c *Bot) GetName() string { return c.Name }
 
 func (c *Bot) Card(player *Player, options []*CardInstance) (int, error) {
-	if len(options) == 0 { return SkipCode, nil }
+	if len(options) == 0 {
+		return SkipCode, nil
+	}
 	return 0, nil
 }
 
 func (c *Bot) Field(player *Player, options []int) (int, error) {
-	if len(options) == 0 { return SkipCode, nil }
+	if len(options) == 0 {
+		return SkipCode, nil
+	}
 	return 0, nil
 }
 
 func (c *Bot) Ability(player *Player, options []*Activated, card *CardInstance) (int, error) {
-	if len(options) == 0 { return SkipCode, nil }
+	if len(options) == 0 {
+		return SkipCode, nil
+	}
 	return 0, nil
 }
 
 func (c *Bot) Target(player *Player, options []*CardInstance, num int) ([]int, error) {
-	if len(options) == 0 { return []int{SkipCode}, nil }
+	if len(options) == 0 {
+		return []int{SkipCode}, nil
+	}
 	opts := []int{}
-	for i := range options { opts = append(opts, i) }
+	for i := range options {
+		opts = append(opts, i)
+	}
 	return opts[:num], nil
 }
 
 func (c *Bot) Discard(player *Player, options []*CardInstance, num int) ([]int, error) {
-	if len(options) == 0 || num == 0 { return []int{SkipCode}, nil }
+	if len(options) == 0 || num == 0 {
+		return []int{SkipCode}, nil
+	}
 	opts := []int{}
-	for i := range options { opts = append(opts, i) }
+	for i := range options {
+		opts = append(opts, i)
+	}
 	return opts[:num], nil
 }
 
 func init() {
 	for _, txt := range strings.Split(string(cardText), "\n\n") {
-		card, err := parser.Parse(txt)
+		card, err := parser.Parse(txt, true)
 		if err != nil {
 			fmt.Println(err)
 			continue
@@ -240,10 +255,55 @@ func (room *Room) Run() {
 	}
 }
 
+type CardInfo struct {
+	Name      string   `json:"name"`
+	Costs     []string `json:"costs,omitempty"`
+	Types     []string `json:"types"`
+	Subtypes  []string `json:"subtypes,omitempty"`
+	Keywords  []string `json:"keywords,omitempty"`
+	Activated []string `json:"activated,omitempty"`
+	Triggered []string `json:"triggers,omitempty"`
+	Static    []string `json:"static,omitempty"`
+	Power     string   `json:"power"`
+	Health    string   `json:"health"`
+}
+
+func GetCardInfo(c *CardInstance) CardInfo {
+	info := CardInfo{
+		Name:      c.Card.Name,
+		Types:     []string{},
+		Subtypes:  []string{},
+		Keywords:  []string{},
+		Activated: []string{},
+		Triggered: []string{},
+		Power:     c.GetPower().String(),
+		Health:    c.GetHealth().String(),
+	}
+	for _, t := range c.GetTypes() {
+		info.Types = append(info.Types, t.Value)
+	}
+	for _, s := range c.GetSubtypes() {
+		info.Subtypes = append(info.Subtypes, s.Value)
+	}
+	for _, k := range c.GetKeywords() {
+		info.Keywords = append(info.Keywords, k.Value)
+	}
+	for _, a := range c.GetActivatedAbilities() {
+		info.Activated = append(info.Activated, a.Text())
+	}
+	for _, t := range c.GetTriggeredAbilities() {
+		info.Triggered = append(info.Triggered, t.Text())
+	}
+	for _, s := range c.GetStaticAbilities() {
+		info.Static = append(info.Static, s.Text())
+	}
+	return info
+}
+
 type GameInfo struct {
 	Players map[string]string `json:"players,omitempty"`
-	Cards []string          `json:"cards,omitempty"`
-	Seen  map[string]string `json:"seen,omitempty"`
+	Cards   []CardInfo        `json:"cards,omitempty"`
+	Seen    map[string]string `json:"seen,omitempty"`
 }
 
 type GameEvent struct {
@@ -251,7 +311,7 @@ type GameEvent struct {
 	Subject    string `json:"subject,omitempty"`
 	Source     string `json:"source,omitempty"`
 	Controller string `json:"controller,omitempty"`
-	Args 	   []any  `json:"args,omitempty"`
+	Args       []any  `json:"args,omitempty"`
 }
 
 type GameRequest struct {
@@ -266,9 +326,10 @@ func (room *Room) eventHandler(event *Event) {
 	if event.Event == EventOnDraw || event.Event == EventOnEnterBoard {
 		for _, client := range room.clients {
 			if client.player == card.Owner || event.Event == EventOnEnterBoard {
+
 				client.sendInfo(&GameInfo{
 					Seen:  map[string]string{card.GetId().String(): card.Card.Name},
-					Cards: []string{card.Card.Text},
+					Cards: []CardInfo{GetCardInfo(card)},
 				})
 			}
 		}
@@ -371,8 +432,8 @@ func (client *Client) sendInfo(info *GameInfo) {
 
 func (c *Client) prompt(action string, choices []string, num int, card string) ([]int, error) {
 	m := Message{
-		Type:   GamePromptAction,
-		Data:   &GameRequest{action, choices, num, card},
+		Type: GamePromptAction,
+		Data: &GameRequest{action, choices, num, card},
 	}
 	c.send <- m.encode()
 	choice := <-c.receive
@@ -417,6 +478,9 @@ func (c *Client) Field(player *Player, options []int) (int, error) {
 		choices = append(choices, fmt.Sprintf("%d", c))
 	}
 	result, err := c.prompt(GameFieldAction, choices, 0, "")
+	if len(result) == 0 {
+		return SkipCode, nil
+	}
 	return result[0], err
 }
 
@@ -427,13 +491,16 @@ func (c *Client) Ability(player *Player, options []*Activated, card *CardInstanc
 	choices := []string{}
 	for i, a := range card.GetActivatedAbilities() {
 		for _, c := range options {
-			if a == c {
+			if reflect.DeepEqual(a, c) {
 				choices = append(choices, fmt.Sprintf("%d", i))
 				break
 			}
 		}
 	}
 	result, err := c.prompt(GameAbilityAction, choices, 0, card.Id.String())
+	if len(result) == 0 {
+		return SkipCode, nil
+	}
 	return result[0], err
 }
 

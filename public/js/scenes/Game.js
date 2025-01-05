@@ -21,6 +21,17 @@ export default class Game extends Phaser.Scene {
 		this.load.image('background', 'background.png');
 		this.load.image('field', 'field.png');
     	this.load.bitmapFont('pressstart', 'pressstart.png', 'pressstart.fnt');
+
+		this.load.scenePlugin({
+			key: 'rexuiplugin',
+			url: '../js/plugins/rexuiplugin.min.js',
+			sceneKey: 'rexUI'
+		});
+		this.load.plugin(
+			'rexbbcodetextplugin',
+			'../js/plugins/rexbbcodetextplugin.min.js',
+			true
+		);
 	}
 
 	create() {
@@ -70,31 +81,25 @@ export default class Game extends Phaser.Scene {
 				}
 			}
 			for (let i = 0; i < message.cards?.length || 0; i++) {
-				let card = message.cards[i].split('\n');
-				let cardName = card[0].split(' {')[0];
-				let cardCosts = card[0].split(' {')[1]?.split('}')[0].split('}{');
-				let cardType = card[1];
-				let powerHealth = card[card.length - 1].split(' / ');
-				let cardText;
-				if (powerHealth.length > 1) {
-					cardText = card.slice(2, card.length - 2).join('\n');
-				} else {
-					cardText = card.slice(2, card.length - 1).join('\n');
-					powerHealth = null;
-				}
-				this.cards[cardName] = {
-					name: cardName,
-					costs: cardCosts,
-					type: cardType,
-					text: cardText,
-					power: powerHealth && powerHealth[0],
-					health: powerHealth && powerHealth[1],
+				let card = message.cards[i];
+				this.cards[card.name] = {
+					name: card.name,
+					costs: card.costs,
+					type: card.types,
+					subtypes: card.subtypes,
+					keywords: card.keywords,
+					activated: card.activated,
+					triggered: card.triggered,
+					static: card.static,
+					power: card.power,
+					health: card.health,
 				};
 			}
 			for (const prop in message.seen || {}) {
 				this.seen[prop] = this.cards[message.seen[prop]];
 				if (this.cardInstances[prop]) {
 					this.cardInstances[prop].setCardName(this.seen[prop].name);
+					this.cardInstances[prop].setAbilities(this.seen[prop].activated);
 					// TODO: avatar
 				}
 			}
@@ -122,28 +127,34 @@ export default class Game extends Phaser.Scene {
 
 		this.conn.on('game.prompt', (event) => {
 			const message = event.data;
+			this.disableAll();
 			if (message.action === 'card') {
 				for (const card in this.cardInstances) {
 					this.cardInstances[card].setActive(message.options.includes(card));
 				}
-				for (const zone in this.players[this.player.id].board.zones) {
-					this.players[this.player.id].board.setActive(zone, false);
-				}
 			} else if (message.action === 'field') {
-				for (const card in this.cardInstances) {
-					this.cardInstances[card].setActive(false);
-				}
 				for (const zone in this.players[this.player.id].board.zones) {
 					this.players[this.player.id].board.setActive(zone, message.options.includes(zone.toString()));
 				}
+			} else if (message.action === 'ability') {
+				this.cardInstances[message.card].openAbilityMenu(message.options.map((o) => parseInt(o)));
 			}
 		});
 
-		this.conn.send({
-			type: 'game.ready',
-			data: this.room,
-		});
+		this.conn.send({ type: 'game.ready', data: this.room });
 	}
 
 	update() {}
+
+	disableAll() {
+		for (const card in this.cardInstances) {
+			this.cardInstances[card].setActive(false);
+		}
+		for (const playerId in this.players) {
+			const player = this.players[playerId];
+			for (const zone in player.board.zones) {
+				player.board.setActive(zone, false);
+			}
+		}
+	}
 }

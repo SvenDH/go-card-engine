@@ -262,7 +262,7 @@ func (p *Player) Run() bool {
 				}
 				return false
 			}
-			if selected[0] >= 0 || selected[0] < len(activatable) {
+			if selected[0] >= 0 && selected[0] < len(activatable) {
 				a := activatable[selected[0]].(*Activated)
 				e := card.Do(a)
 				if a.IsCost() {
@@ -935,7 +935,12 @@ func NewCardParser() *CardParser {
 			{"Int", `\d+`},
 		})),
 		//participle.UseLookahead(2),
-		participle.Union[Ability](Keyword{}, Composed{}, Activated{}, Triggered{}),
+		participle.Union[Ability](
+			Keyword{},
+			Composed{},
+			Activated{},
+			Triggered{},
+		),
 		participle.Union[Effect](
 			PlayerSubjectAbility{},
 			CardSubjectAbility{},
@@ -973,7 +978,7 @@ func NewCardParser() *CardParser {
 	return &CardParser{parser}
 }
 
-func (p *CardParser) Parse(txt string) (*Card, error) {
+func (p *CardParser) Parse(txt string, include_text bool) (*Card, error) {
 	name := strings.TrimSpace(strings.SplitN(strings.SplitN(strings.TrimSpace(txt), "\n", 2)[0], "{", 2)[0])
 	input := strings.ReplaceAll(strings.ToLower(txt), strings.ToLower(name), "NAME")
 	card, err := p.parser.ParseString("", input)
@@ -981,7 +986,29 @@ func (p *CardParser) Parse(txt string) (*Card, error) {
 		return nil, err
 	}
 	card.Name = name
-	card.Text = txt
+	if include_text {
+		card.Text = txt
+		// TODO: this brakes if there are multiple abilities on the same line (e.g. the keywords are at the end instead of the beginning)
+		lines := strings.Split(txt, "\n")
+		if card.Stats != nil {
+			lines = lines[:len(lines)-1]
+		}
+		for i := range lines {
+			line := strings.TrimSpace(lines[len(lines) - 1 - i])
+			j := len(card.Abilities) - 1 - i
+			if j < 0 { break }
+			if a, ok := card.Abilities[j].(Activated); ok {
+				a.text = line
+				card.Abilities[j] = a
+			} else if a, ok := card.Abilities[j].(Triggered); ok {
+				a.text = line
+				card.Abilities[j] = a
+			} else if a, ok := card.Abilities[j].(Composed); ok {
+				a.text = line
+				card.Abilities[j] = a
+			}
+		}
+	}
 	return card, nil
 }
 
@@ -1147,11 +1174,78 @@ func (c *CardInstance) GetId() ulid.ULID { return c.Id }
 func (c *CardInstance) GetName() string { return c.Card.Name }
 
 func (c *CardInstance) GetPower() NumberOrX {
+	if c.stats == nil { return NumberOrX{} }
 	return c.stats.Power
 }
 
 func (c *CardInstance) GetHealth() NumberOrX {
+	if c.stats == nil { return NumberOrX{} }
 	return c.stats.Health
+}
+
+func (c *CardInstance) GetTypes() []CardType {
+	return c.Card.Types
+}
+
+func (c *CardInstance) GetSubtypes() []SubType {
+	return c.Card.Subtypes
+}
+
+func (c *CardInstance) GetKeywords() []Keyword {
+	keywords := []Keyword{}
+	for _, a := range c.Card.Abilities {
+		if keyword, ok := a.(Keyword); ok {
+			keywords = append(keywords, keyword)
+		}
+	}
+	return keywords
+}
+
+func (c *CardInstance) GetActivatedAbilities() []*Activated {
+	abilities := []*Activated{}
+	for _, a := range c.Card.Abilities {
+		if ab, ok := a.(Activated); ok {
+			abilities = append(abilities, &ab)
+		}
+	}
+	if c.HasType("unit") {
+		abilities = append(abilities, AttackAbility)
+	}
+	if c.HasType("source") {
+		if c.HasColor("s") {
+			abilities = append(abilities, SEssenseAbility)
+		}
+		if c.HasColor("o") {
+			abilities = append(abilities, OEssenseAbility)
+		}
+		if c.HasColor("c") {
+			abilities = append(abilities, CEssenseAbility)
+		}
+		if c.HasColor("w") {
+			abilities = append(abilities, WEssenseAbility)
+		}
+	}
+	return abilities
+}
+
+func (c *CardInstance) GetTriggeredAbilities() []*Triggered {
+	abilities := []*Triggered{}
+	for _, a := range c.Card.Abilities {
+		if ab, ok := a.(Triggered); ok {
+			abilities = append(abilities, &ab)
+		}
+	}
+	return abilities
+}
+
+func (c *CardInstance) GetStaticAbilities() []Ability {
+	abilities := []Ability{}
+	for _, a := range c.Card.Abilities {
+		if _, ok := a.(Composed); ok {
+			abilities = append(abilities, a)
+		}
+	}
+	return abilities
 }
 
 func (c *CardInstance) GetActivatable() []any {
@@ -1254,8 +1348,8 @@ func (c *CardInstance) GetCosts() []AbilityCost {
 }
 
 func (c *CardInstance) HasKeyword(k string) bool {
-	for _, a := range c.Card.Abilities {
-		if keyword, ok := a.(*Keyword); ok && keyword.Value == k {
+	for _, a := range c.GetKeywords() {
+		if a.Value == k {
 			return true
 		}
 	}
@@ -1263,7 +1357,7 @@ func (c *CardInstance) HasKeyword(k string) bool {
 }
 
 func (c *CardInstance) HasType(t string) bool {
-	for _, ct := range c.Card.Types {
+	for _, ct := range c.GetTypes() {
 		if ct.Value == t {
 			return true
 		}
@@ -1272,7 +1366,7 @@ func (c *CardInstance) HasType(t string) bool {
 }
 
 func (c *CardInstance) HasSubType(t string) bool {
-	for _, ct := range c.Card.Subtypes {
+	for _, ct := range c.GetSubtypes() {
 		if ct.Value == t {
 			return true
 		}
@@ -1287,43 +1381,6 @@ func (c *CardInstance) HasColor(t string) bool {
 		}
 	}
 	return false
-}
-
-func (c *CardInstance) GetActivatedAbilities() []*Activated {
-	abilities := []*Activated{}
-	for _, a := range c.Card.Abilities {
-		if ab, ok := a.(Activated); ok {
-			abilities = append(abilities, &ab)
-		}
-	}
-	if c.HasType("unit") {
-		abilities = append(abilities, AttackAbility)
-	}
-	if c.HasType("source") {
-		if c.HasColor("s") {
-			abilities = append(abilities, SEssenseAbility)
-		}
-		if c.HasColor("o") {
-			abilities = append(abilities, OEssenseAbility)
-		}
-		if c.HasColor("c") {
-			abilities = append(abilities, CEssenseAbility)
-		}
-		if c.HasColor("w") {
-			abilities = append(abilities, WEssenseAbility)
-		}
-	}
-	return abilities
-}
-
-func (c *CardInstance) GetTriggeredAbilities() []*Triggered {
-	abilities := []*Triggered{}
-	for _, a := range c.Card.Abilities {
-		if ab, ok := a.(Triggered); ok {
-			abilities = append(abilities, &ab)
-		}
-	}
-	return abilities
 }
 
 type Attack struct{}
@@ -1355,7 +1412,8 @@ func createEssenceAbility(color string) *Activated {
 		[]AbilityCost{{Cost: &CostType{Deactivate: true}}},
 		Composed{[]Effect{PlayerSubjectAbility{
 			nil, false, []PlayerEffect{Add{[]CostType{{Color: color}}}},
-		}}},
+		}}, ""},
+		fmt.Sprintf("{T}: Add {%s} essence", strings.ToUpper(color)),
 	}
 }
 
@@ -1366,10 +1424,11 @@ var WEssenseAbility = createEssenceAbility("w")
 
 var AttackAbility = &Activated{
 	[]AbilityCost{{Cost: &CostType{Deactivate: true}}},
-	Composed{[]Effect{CardSubjectAbility{nil, []CardEffect{Attack{}}}}},
+	Composed{[]Effect{CardSubjectAbility{nil, []CardEffect{Attack{}}}}, ""},
+	"Attack",
 }
 
-type Ability interface{ value() }
+type Ability interface{ Text() string }
 
 type Effect interface {
 	HasTarget() bool
@@ -1394,7 +1453,7 @@ type Keyword struct {
 	Value string `@("fly"|"siege"|"poison"|"ambush")`
 }
 
-func (f Keyword) value() {}
+func (f Keyword) Text() string { return f.Value }
 
 type AbilityCost struct {
 	Cost   *CostType `@@`
@@ -1402,15 +1461,15 @@ type AbilityCost struct {
 }
 
 type Composed struct {
-	Effects []Effect `@@ ("," ("then"|"and")? @@)* "."`
+	Effects []Effect `@@ ((","|".") ("then"|"and")? @@)* "."`
+	text string
 }
 
-func (f Composed) value() {}
+func (f Composed) Text() string { return f.text }
 
 func (f Composed) Do(p *Player, a *AbilityInstance) {
 	for _, e := range f.Effects {
-		effect := EffectInstance{Ability: a, Effect: e}
-		e.Do(&effect)
+		e.Do(&EffectInstance{Ability: a, Effect: e})
 	}
 }
 
@@ -1526,9 +1585,10 @@ func (f PlayerSubjectAbility) Resolve(e *EffectInstance) {}
 type Activated struct {
 	Cost   []AbilityCost `@@+ ":"`
 	Effect Composed      `@@`
+	text string
 }
 
-func (f Activated) value() {}
+func (f Activated) Text() string { return f.text }
 
 func (f Activated) CanDo(card *CardInstance) bool {
 	if card.zone != ZoneBoard {
@@ -1553,6 +1613,24 @@ func (f Activated) IsCost() bool {
 }
 
 func (f Activated) HasTarget() bool { return f.Effect.HasTarget() }
+
+type Triggered struct {
+	Trigger Trigger  `@@ ","`
+	Effect  Composed `@@`
+	text string
+}
+
+func (f Triggered) Text() string { return f.text}
+
+func (f Triggered) Do(p *Player, c *CardInstance) *AbilityInstance {
+	a := NewAbilityInstance(p, c, f)
+	if f.Trigger.Match(a, c) {
+		f.Trigger.Do(p, a)
+		f.Effect.Do(p, a)
+		return a
+	}
+	return nil
+}
 
 type PlayerCondition struct {
 	Player    PlayerMatch `@@`
@@ -1701,23 +1779,6 @@ func (t Trigger) Do(p *Player, a *AbilityInstance) {
 	} else if t.Condition != nil {
 		t.Condition.Do(p, a)
 	}
-}
-
-type Triggered struct {
-	Trigger Trigger  `@@ ","`
-	Effect  Composed `@@`
-}
-
-func (f Triggered) value() {}
-
-func (f Triggered) Do(p *Player, c *CardInstance) *AbilityInstance {
-	a := NewAbilityInstance(p, c, f)
-	if f.Trigger.Match(a, c) {
-		f.Trigger.Do(p, a)
-		f.Effect.Do(p, a)
-		return a
-	}
-	return nil
 }
 
 var PlayerSelf = PlayerMatch{[]PlayerTypeMatch{{Self: true}}}

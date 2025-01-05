@@ -1,21 +1,35 @@
+const COLOR_MAIN = 0x4e342e;
+const COLOR_LIGHT = 0x7b5e57;
+const COLOR_DARK = 0x260e04;
+
 export default class Card extends Phaser.GameObjects.Container {
   	constructor({ scene, x, y, id, name, image, location = 'deck', faceup = false }) {
-		let spriteCard = new Phaser.GameObjects.Sprite(scene, 0, 0, faceup ? 'card' : 'back').setOrigin(0.5, 1);
-		let spriteImage = new Phaser.GameObjects.Sprite(scene, 0, -34, image).setOrigin(0.5, 1);
-		let textName = new Phaser.GameObjects.BitmapText(scene, -33, -77, 'pressstart', name, 8, Phaser.GameObjects.BitmapText.ALIGN_CENTER);
+		let spriteCard = new Phaser.GameObjects.Sprite(scene, 0, 0, faceup ? 'card' : 'back').setOrigin(0.5, 1).setScale(2.0);
+		let spriteImage = new Phaser.GameObjects.Sprite(scene, 0, -68, image).setOrigin(0.5, 1).setScale(2.0);
+		let textName = new Phaser.GameObjects.BitmapText(scene, -66, -154, 'pressstart', name, 12, Phaser.GameObjects.BitmapText.ALIGN_CENTER);
 		super(scene, x, y, [spriteCard, spriteImage, textName]);
 		this.spriteCard = spriteCard;
 		this.spriteImage = spriteImage;
 		this.textName = textName;
+		this.abilities = [];
+		this.abilityMenu = null;
 		this.cardname = name;
 		this.scene = scene;
 		this.id = id;
 		this.location = location;
 		this.index = -1;
 		this.isDragging = false;
+
 		this.scene.add.existing(this);
+
 		this.setActive(false);
 		this.setFaceup(faceup);
+
+		this.on("pointerdown", () => {
+			if (scene.player.board.contains(this)) {
+				scene.conn.send({ type: 'game.choice', data: [this.id] });
+			}
+		}, this);
     
 		this.on("dragstart", (pointer) => {
 			if (scene.player.hand.contains(this)) {
@@ -29,7 +43,7 @@ export default class Card extends Phaser.GameObjects.Container {
 					angle: 0,
 					x: pointer.x,
 					y: pointer.y,
-					scale: 4.0,
+					scale: 2.0,
 					duration: 150
 				});
 				
@@ -58,14 +72,10 @@ export default class Card extends Phaser.GameObjects.Container {
 				if (player.board.zones.includes(target)) {
 					let index = player.board.zones.indexOf(target);
 					player.board.addCard(index, this);
-					scene.conn.send({
-						type: 'game.choice',
-						data: [index.toString()],
-					});
+					scene.conn.send({ type: 'game.choice', data: [index.toString()] });
 					return;
 				}
 			}
-			scene.player.hand.addCard(this);
 		}, this);
 
 		this.on("dragend", (pointer, dragX, dragY, dropped) => {
@@ -74,6 +84,7 @@ export default class Card extends Phaser.GameObjects.Container {
 
 				if(!dropped) {
 					scene.player.hand.addCard(this);
+					scene.conn.send({ type: 'game.choice', data: [] });
 				}
 
 				scene.tweens.add({
@@ -92,13 +103,17 @@ export default class Card extends Phaser.GameObjects.Container {
 		this.cardname = value;
 	}
 
+	setAbilities(abilities) {
+		this.abilities = abilities;
+	}
+
 	setActive(isActive) {
 		this.isActive = isActive;
 		if (this.isDragging) return;
 
 		if (isActive) {
 			this.setInteractive({
-				hitArea: new Phaser.Geom.Rectangle(-37.5, -82, 75, 82),
+				hitArea: new Phaser.Geom.Rectangle(-75, -164, 75, 164),
 				hitAreaCallback: Phaser.Geom.Rectangle.Contains,
 				draggable: isActive
 			});
@@ -136,5 +151,33 @@ export default class Card extends Phaser.GameObjects.Container {
 			}
 		]);
 		this.isFaceUp = isFaceUp;
+	}
+
+	openAbilityMenu(options) {
+		let scene = this.scene;
+		let abilities = options.map((option) => ({ text: this.abilities[option], children: [] }));
+		this.abilityMenu = scene.rexUI.add.menu({
+			items: abilities,
+			createBackgroundCallback: function (items) {
+				return scene.rexUI.add.roundRectangle(0, 0, 2, 2, 0, COLOR_MAIN);
+			},
+			createButtonCallback: function (item, i, items) {
+				return scene.rexUI.add.label({
+					background: scene.rexUI.add.roundRectangle(0, 0, 2, 2, 0),
+					text: scene.add.rexBBCodeText(0, 0, item.text, {fontFamily: 'Arial', fontSize: '8px'}),
+					//icon: scene.rexUI.add.roundRectangle(0, 0, 0, 0, 4, COLOR_DARK),
+					space: {
+						left: 2,
+						right: 2,
+						top: 1,
+						bottom: 1,
+						icon: 1
+					}
+				})
+			},
+		});
+		this.add(this.abilityMenu);
+		//this.abilityMenu.collapse();
+		
 	}
 }

@@ -15,7 +15,7 @@ export default class Board extends Phaser.GameObjects.Group {
             for (let column = 0; column < columns; column++) {
                 var zx = x + column * (fieldWidth + marginX);
                 var zy = y + row * (fieldHeight + marginY);
-		        this.sprites.push(scene.add.sprite(zx, zy, 'field').setScale(2.0));
+		        this.sprites.push(scene.add.sprite(zx, zy, 'field').setScale(2.0).setTint(0x7f7f7f));
                 this.zones.push(
                     scene.add.zone(zx, zy, fieldWidth, fieldHeight)
                     .setRectangleDropZone(fieldWidth, fieldHeight)
@@ -40,7 +40,7 @@ export default class Board extends Phaser.GameObjects.Group {
 			angle: 0,
 			x: zone.x,
 			y: zone.y + 82,
-			scale: 2.0,
+			scale: 1.0,
 			duration: 150,
 			callbackScope: card,
 			onComplete: () => {

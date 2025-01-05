@@ -32,7 +32,7 @@ export default class Hand extends Phaser.GameObjects.Group {
 				rotation,
 				x,
 				y,
-				scale: 2.0,
+				scale: 1.0,
 				duration: 150,
 			});
 		}, this);
