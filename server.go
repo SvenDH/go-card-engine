@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -60,39 +59,7 @@ type Bot struct {
 
 func (c *Bot) GetName() string { return c.Name }
 
-func (c *Bot) Card(player *Player, options []*CardInstance) (int, error) {
-	if len(options) == 0 {
-		return SkipCode, nil
-	}
-	return 0, nil
-}
-
-func (c *Bot) Field(player *Player, options []int) (int, error) {
-	if len(options) == 0 {
-		return SkipCode, nil
-	}
-	return 0, nil
-}
-
-func (c *Bot) Ability(player *Player, options []*Activated, card *CardInstance) (int, error) {
-	if len(options) == 0 {
-		return SkipCode, nil
-	}
-	return 0, nil
-}
-
-func (c *Bot) Target(player *Player, options []*CardInstance, num int) ([]int, error) {
-	if len(options) == 0 {
-		return []int{SkipCode}, nil
-	}
-	opts := []int{}
-	for i := range options {
-		opts = append(opts, i)
-	}
-	return opts[:num], nil
-}
-
-func (c *Bot) Discard(player *Player, options []*CardInstance, num int) ([]int, error) {
+func (c *Bot) Prompt(action string, options []string, num int) ([]int, error) {
 	if len(options) == 0 || num == 0 {
 		return []int{SkipCode}, nil
 	}
@@ -318,7 +285,6 @@ type GameRequest struct {
 	Action  string   `json:"action"`
 	Options []string `json:"options,omitempty"`
 	Num     int      `json:"num,omitempty"`
-	Card    string   `json:"card,omitempty"`
 }
 
 func (room *Room) eventHandler(event *Event) {
@@ -430,10 +396,10 @@ func (client *Client) sendInfo(info *GameInfo) {
 	client.send <- m.encode()
 }
 
-func (c *Client) prompt(action string, choices []string, num int, card string) ([]int, error) {
+func (c *Client) Prompt(action string, choices []string, num int) ([]int, error) {
 	m := Message{
 		Type: GamePromptAction,
-		Data: &GameRequest{action, choices, num, card},
+		Data: &GameRequest{action, choices, num},
 	}
 	c.send <- m.encode()
 	choice := <-c.receive
@@ -455,75 +421,6 @@ func (c *Client) prompt(action string, choices []string, num int, card string) (
 		}
 	}
 	return selected, nil
-}
-
-func (c *Client) Card(player *Player, options []*CardInstance) (int, error) {
-	if len(options) == 0 {
-		return SkipCode, nil
-	}
-	choices := []string{}
-	for _, c := range options {
-		choices = append(choices, c.Id.String())
-	}
-	result, err := c.prompt(GameCardAction, choices, 0, "")
-	return result[0], err
-}
-
-func (c *Client) Field(player *Player, options []int) (int, error) {
-	if len(options) == 0 {
-		return SkipCode, nil
-	}
-	choices := []string{}
-	for _, c := range options {
-		choices = append(choices, fmt.Sprintf("%d", c))
-	}
-	result, err := c.prompt(GameFieldAction, choices, 0, "")
-	if len(result) == 0 {
-		return SkipCode, nil
-	}
-	return result[0], err
-}
-
-func (c *Client) Ability(player *Player, options []*Activated, card *CardInstance) (int, error) {
-	if len(options) == 0 {
-		return SkipCode, nil
-	}
-	choices := []string{}
-	for i, a := range card.GetActivatedAbilities() {
-		for _, c := range options {
-			if reflect.DeepEqual(a, c) {
-				choices = append(choices, fmt.Sprintf("%d", i))
-				break
-			}
-		}
-	}
-	result, err := c.prompt(GameAbilityAction, choices, 0, card.Id.String())
-	if len(result) == 0 {
-		return SkipCode, nil
-	}
-	return result[0], err
-}
-
-func (c *Client) Target(player *Player, options []*CardInstance, num int) ([]int, error) {
-	if len(options) == 0 {
-		return []int{SkipCode}, nil
-	}
-	opts := []string{}
-	for _, c := range options {
-		opts = append(opts, c.Id.String())
-	}
-	return c.prompt(GameTargetAction, opts, num, "")
-}
-
-func (c *Client) Discard(player *Player, options []*CardInstance, num int) ([]int, error) {
-	if len(options) == 0 || num == 0 {
-		return []int{SkipCode}, nil
-	}
-	opts := []string{}
-	for _, c := range options {
-		opts = append(opts, c.Id.String())
-	}
-	return c.prompt(GameDiscardAction, opts, num, "")
 }
 
 func (client *Client) readPump() {
@@ -629,12 +526,8 @@ func (client *Client) handleNewMessage(jsonMessage []byte) {
 		if room != nil {
 			room.broadcast <- &message
 		}
-	case JoinRoomAction:
-		client.handleJoinRoomMessage(&message)
-	case LeaveRoomAction:
-		client.handleLeaveRoomMessage(&message)
 	case JoinRoomPrivateAction:
-		client.handleJoinRoomPrivateMessage(&message)
+		client.handleJoinRoom(&message)
 	case SinglePlayerAction:
 		client.handleAddNpc(&message)
 	case GameReadyAction:
@@ -644,18 +537,7 @@ func (client *Client) handleNewMessage(jsonMessage []byte) {
 	}
 }
 
-func (client *Client) handleJoinRoomMessage(message *Message) {
-	client.joinRoom(message.Data.(string), "")
-}
-
-func (client *Client) handleLeaveRoomMessage(message *Message) {
-	if room := client.server.rooms[message.Data.(string)]; room != nil {
-		client.room = nil
-		room.unregister <- client
-	}
-}
-
-func (client *Client) handleJoinRoomPrivateMessage(message *Message) {
+func (client *Client) handleJoinRoom(message *Message) {
 	if target := client.server.repository.FindUserByName(message.Data.(string)); target != nil {
 		roomName := ulid.Make().String()
 		if joinedRoom := client.joinRoom(roomName, target.Name); joinedRoom != nil {

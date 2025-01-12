@@ -129,15 +129,23 @@ export default class Game extends Phaser.Scene {
 			const message = event.data;
 			this.disableAll();
 			if (message.action === 'card') {
-				for (const card in this.cardInstances) {
-					this.cardInstances[card].setActive(message.options.includes(card));
-				}
+				// TODO: make skip optional
+				if (!message.options || message.options.length === 0) 
+					this.conn.send({ type: 'game.choice', data: null });
+				else
+					for (const card in this.cardInstances)
+						this.cardInstances[card].setActive(message.options.includes(card));
 			} else if (message.action === 'field') {
-				for (const zone in this.players[this.player.id].board.zones) {
-					this.players[this.player.id].board.setActive(zone, message.options.includes(zone.toString()));
-				}
+				if (!message.options || message.options.length === 0) 
+					this.conn.send({ type: 'game.choice', data: null });
+				else
+					for (const zone in this.players[this.player.id].board.zones)
+						this.players[this.player.id].board.setActive(zone, message.options.includes(zone.toString()));
 			} else if (message.action === 'ability') {
-				this.cardInstances[message.card].openAbilityMenu(message.options.map((o) => parseInt(o)));
+				if (!message.options || message.options.length === 0) 
+					this.conn.send({ type: 'game.choice', data: null });
+				else
+					this.cardInstances[message.options[0].split('.')[0]].openAbilityMenu(message.options.map((o) => parseInt(o.split('.')[1])));
 			}
 		});
 

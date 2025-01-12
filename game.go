@@ -64,11 +64,7 @@ const startCards = 3
 const startLife = 20
 
 type CommandI interface {
-	Card(*Player, []*CardInstance) (int, error)
-	Field(*Player, []int) (int, error)
-	Ability(*Player, []*Activated, *CardInstance) (int, error)
-	Target(*Player, []*CardInstance, int) ([]int, error)
-	Discard(*Player, []*CardInstance, int) ([]int, error)
+	Prompt(string, []string, int) ([]int, error)
 }
 
 type GameObject interface {
@@ -151,7 +147,7 @@ type Event struct {
 	Event   EventType
 	Source  *AbilityInstance
 	Subject GameObject
-	Args   []any
+	Args    []any
 }
 
 type Board struct {
@@ -248,15 +244,20 @@ func (p *Player) GetId() ulid.ULID { return p.Id }
 
 func (p *Player) Run() bool {
 	for {
-		selected := []int{0}
+		selected := []int{}
 		choices := p.GetPlayableCards()
-		if !p.prompt("card", 1, choices, &selected, nil) || selected[0] < 0 || selected[0] >= len(choices) {
+		if !p.prompt("card", 1, choices, &selected) || selected[0] < 0 || selected[0] >= len(choices) {
 			return selected[0] == SkipCode
 		}
 		card := choices[selected[0]].(*CardInstance)
 		if card.CanDo() {
-			activatable := card.GetActivatable()
-			if !p.prompt("ability", 1, activatable, &selected, card) {
+			activatable := []any{}
+			for i, a := range card.GetActivatedAbilities() {
+				if a.CanDo(card) {
+					activatable = append(activatable, fmt.Sprintf("%s.%d", card.GetId().String(), i))
+				}
+			}
+			if !p.prompt("ability", 1, activatable, &selected) {
 				if selected[0] == SkipCode {
 					continue
 				}
@@ -275,13 +276,13 @@ func (p *Player) Run() bool {
 		} else {
 			flipped := card.CanSource()
 			if flipped && card.CanPlay() {
-				if !p.prompt("source", 1, nil, &selected, nil) || selected[0] < 0 {
+				if !p.prompt("source", 1, nil, &selected) || selected[0] < 0 {
 					return selected[0] == SkipCode
 				}
 				flipped = selected[0] == 1
 			}
 			fields := p.freeFields(card)
-			if !p.prompt("field", 1, fields, &selected, nil) || selected[0] < 0 {
+			if !p.prompt("field", 1, fields, &selected) || selected[0] < 0 {
 				if selected[0] == SkipCode {
 					continue
 				}
@@ -298,37 +299,27 @@ func (p *Player) Run() bool {
 	}
 }
 
-func convertArray[T any](arr []any) []T {
-	res := make([]T, len(arr))
-	for i, a := range arr {
-		res[i] = a.(T)
-	}
-	return res
-}
-
 func (p *Player) prompt(
 	cmd string,
 	num int,
 	choices []any,
 	selected *[]int,
-	context any,
 ) bool {
 	var err error
 	var arr []int
 	if p.cmdi != nil {
-		if cmd == "card" {
-			(*selected)[0], err = p.cmdi.Card(p, convertArray[*CardInstance](choices))
-		} else if cmd == "field" {
-			(*selected)[0], err = p.cmdi.Field(p, convertArray[int](choices))
-		} else if cmd == "ability" {
-			(*selected)[0], err = p.cmdi.Ability(p, convertArray[*Activated](choices), context.(*CardInstance))
-		} else if cmd == "target" {
-			arr, err = p.cmdi.Target(p, convertArray[*CardInstance](choices), num)
-			*selected = append(*selected, arr...)
-		} else if cmd == "discard" {
-			arr, err = p.cmdi.Discard(p, convertArray[*CardInstance](choices), num)
-			*selected = append(*selected, arr...)
+		serializable := []string{}
+		for _, choice := range choices {
+			if card, ok := choice.(GameObject); ok {
+				serializable = append(serializable, card.GetId().String())
+			} else if s, ok := choice.(int); ok {
+				serializable = append(serializable, fmt.Sprintf("%d", s))
+			} else {
+				serializable = append(serializable, fmt.Sprintf("%v", choice))
+			}
 		}
+		arr, err = p.cmdi.Prompt(cmd, serializable, num)
+		*selected = append(*selected, arr...)
 	}
 	if err != nil {
 		(*selected)[0] = ErrorCode
@@ -818,7 +809,7 @@ func (g *Game) Pick(a *AbilityInstance, o Match, z *ZoneMatch) []any {
 			return a.Targeting
 		}
 		targeted := []int{}
-		if !a.Controller.prompt("target", 1, found, &targeted, nil) {
+		if !a.Controller.prompt("target", 1, found, &targeted) {
 			return nil
 		}
 		for _, i := range targeted {
@@ -834,7 +825,7 @@ func (g *Game) Pick(a *AbilityInstance, o Match, z *ZoneMatch) []any {
 				return a.Targeting
 			}
 			targeted := []int{}
-			if !a.Controller.prompt("target", 1, found, &targeted, nil) {
+			if !a.Controller.prompt("target", 1, found, &targeted) {
 				return nil
 			}
 			for _, i := range targeted {
@@ -994,9 +985,11 @@ func (p *CardParser) Parse(txt string, include_text bool) (*Card, error) {
 			lines = lines[:len(lines)-1]
 		}
 		for i := range lines {
-			line := strings.TrimSpace(lines[len(lines) - 1 - i])
+			line := strings.TrimSpace(lines[len(lines)-1-i])
 			j := len(card.Abilities) - 1 - i
-			if j < 0 { break }
+			if j < 0 {
+				break
+			}
 			if a, ok := card.Abilities[j].(Activated); ok {
 				a.text = line
 				card.Abilities[j] = a
@@ -1174,12 +1167,16 @@ func (c *CardInstance) GetId() ulid.ULID { return c.Id }
 func (c *CardInstance) GetName() string { return c.Card.Name }
 
 func (c *CardInstance) GetPower() NumberOrX {
-	if c.stats == nil { return NumberOrX{} }
+	if c.stats == nil {
+		return NumberOrX{}
+	}
 	return c.stats.Power
 }
 
 func (c *CardInstance) GetHealth() NumberOrX {
-	if c.stats == nil { return NumberOrX{} }
+	if c.stats == nil {
+		return NumberOrX{}
+	}
 	return c.stats.Health
 }
 
@@ -1242,16 +1239,6 @@ func (c *CardInstance) GetStaticAbilities() []Ability {
 	abilities := []Ability{}
 	for _, a := range c.Card.Abilities {
 		if _, ok := a.(Composed); ok {
-			abilities = append(abilities, a)
-		}
-	}
-	return abilities
-}
-
-func (c *CardInstance) GetActivatable() []any {
-	abilities := []any{}
-	for _, a := range c.GetActivatedAbilities() {
-		if a.CanDo(c) {
 			abilities = append(abilities, a)
 		}
 	}
@@ -1462,7 +1449,7 @@ type AbilityCost struct {
 
 type Composed struct {
 	Effects []Effect `@@ ((","|".") ("then"|"and")? @@)* "."`
-	text string
+	text    string
 }
 
 func (f Composed) Text() string { return f.text }
@@ -1585,7 +1572,7 @@ func (f PlayerSubjectAbility) Resolve(e *EffectInstance) {}
 type Activated struct {
 	Cost   []AbilityCost `@@+ ":"`
 	Effect Composed      `@@`
-	text string
+	text   string
 }
 
 func (f Activated) Text() string { return f.text }
@@ -1617,10 +1604,10 @@ func (f Activated) HasTarget() bool { return f.Effect.HasTarget() }
 type Triggered struct {
 	Trigger Trigger  `@@ ","`
 	Effect  Composed `@@`
-	text string
+	text    string
 }
 
-func (f Triggered) Text() string { return f.text}
+func (f Triggered) Text() string { return f.text }
 
 func (f Triggered) Do(p *Player, c *CardInstance) *AbilityInstance {
 	a := NewAbilityInstance(p, c, f)
@@ -2267,7 +2254,7 @@ func (f Discard) Resolve(e *EffectInstance) {
 	n := f.Number.Value(e.Ability)
 	for _, p := range e.Subjects {
 		choices := []int{}
-		if !p.(*Player).prompt("discard", n, e.matches, &choices, nil) {
+		if !p.(*Player).prompt("discard", n, e.matches, &choices) {
 			return
 		}
 		for _, i := range choices {
@@ -2323,7 +2310,7 @@ func (f Look) Resolve(e *EffectInstance) {
 	n := f.Number.Value(e.Ability)
 	for _, p := range e.Subjects {
 		cards := p.(*Player).Query(e.Ability, nil, f.Zone)
-		p.(*Player).prompt("look", n, cards[:n], nil, nil)
+		p.(*Player).prompt("look", n, cards[:n], nil)
 	}
 }
 
