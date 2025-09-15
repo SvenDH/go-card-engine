@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -425,20 +424,53 @@ func (c *Client) Prompt(action string, choices []string, num int) ([]int, error)
 
 func (client *Client) readPump() {
 	defer func() {
-		client.disconnect()
+		client.server.unregister <- client
+		client.conn.Close()
 	}()
+
 	client.conn.SetReadLimit(maxMessageSize)
 	client.conn.SetReadDeadline(time.Now().Add(pongWait))
-	client.conn.SetPongHandler(func(string) error { client.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+	client.conn.SetPongHandler(func(string) error {
+		client.conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
 	for {
-		_, jsonMessage, err := client.conn.ReadMessage()
+		_, message, err := client.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("unexpected close error: %v", err)
+				log.Printf("WebSocket read error: %v", err)
 			}
 			break
 		}
-		client.handleNewMessage(jsonMessage)
+
+		// Parse incoming message
+		var msg Message
+		if err := json.Unmarshal(message, &msg); err != nil {
+			log.Printf("Error parsing message: %v", err)
+			continue
+		}
+
+		// Route message to appropriate handler
+		switch msg.Type {
+		case SendMessageAction:
+			client.server.mutex.Lock()
+			room := client.server.rooms[msg.Target]
+			client.server.mutex.Unlock()
+			if room != nil {
+				room.broadcast <- &msg
+			}
+		case JoinRoomPrivateAction:
+			client.handleJoinRoom(&msg)
+		case SinglePlayerAction:
+			client.handleAddNpc(&msg)
+		case GameReadyAction:
+			client.startGame(&msg)
+		case GameChoiceAction:
+			client.receive <- msg.Data
+		default:
+			log.Printf("Unknown message type: %s", msg.Type)
+		}
 	}
 }
 
@@ -448,6 +480,7 @@ func (client *Client) writePump() {
 		ticker.Stop()
 		client.conn.Close()
 	}()
+
 	for {
 		select {
 		case message, ok := <-client.send:
@@ -489,52 +522,34 @@ func (client *Client) disconnect() {
 	client.conn.Close()
 }
 
-func ServeWs(wsServer *Server, w http.ResponseWriter, r *http.Request) {
-	userCtxValue := r.Context().Value(UserContextKey)
-	if userCtxValue == nil {
-		log.Println("Not authenticated")
-		return
-	}
-	user := userCtxValue.(string)
+// handleWebSocket handles incoming WebSocket connections
+func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	// Upgrade HTTP connection to WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println(err)
+		log.Printf("WebSocket upgrade failed: %v", err)
 		return
 	}
-	client := newClient(conn, wsServer, user)
 
+	// Create new client
+	client := &Client{
+		conn:   conn,
+		send:   make(chan []byte, 256),
+		server: s,
+		ID:     ulid.Make().String(),
+	}
+
+	// Register client with server
+	s.mutex.Lock()
+	s.clients[client.ID] = client
+	s.mutex.Unlock()
+
+	// Start goroutines for handling client communication
 	go client.writePump()
 	go client.readPump()
 
-	wsServer.register <- client
-}
-
-func (client *Client) handleNewMessage(jsonMessage []byte) {
-	var message Message
-	if err := json.Unmarshal(jsonMessage, &message); err != nil {
-		log.Printf("Error on unmarshal JSON message %s", err)
-		return
-	}
-	message.Sender = client.Name
-	client.mu.Lock()
-	defer client.mu.Unlock()
-	switch message.Type {
-	case SendMessageAction:
-		client.server.mutex.Lock()
-		room := client.server.rooms[message.Target]
-		client.server.mutex.Unlock()
-		if room != nil {
-			room.broadcast <- &message
-		}
-	case JoinRoomPrivateAction:
-		client.handleJoinRoom(&message)
-	case SinglePlayerAction:
-		client.handleAddNpc(&message)
-	case GameReadyAction:
-		client.startGame(&message)
-	case GameChoiceAction:
-		client.receive <- message.Data
-	}
+	// Log successful connection
+	log.Printf("New WebSocket connection established: %s", client.ID)
 }
 
 func (client *Client) handleJoinRoom(message *Message) {

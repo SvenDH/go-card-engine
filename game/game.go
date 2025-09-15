@@ -1,4 +1,4 @@
-package main
+package game
 
 import (
 	"fmt"
@@ -1448,7 +1448,7 @@ type AbilityCost struct {
 }
 
 type Composed struct {
-	Effects []Effect `@@ ((","|".") ("then"|"and")? @@)* "."`
+	Effects []Effect `@@ ("," ("then"|"and")? @@)* "."`
 	text    string
 }
 
