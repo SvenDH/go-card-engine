@@ -78,7 +78,7 @@ func (l *Logger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 type Router struct {
 	addr     string
-	broker   *MemoryBroker
+	broker   Broker
 	repo     *Repository
 	wsServer *Server
 	mux      http.Handler
@@ -95,7 +95,7 @@ type Router struct {
 // TODO: Add rate limiting middleware
 // TODO: Add compression middleware
 // TODO: Add security headers middleware
-func NewRouter(addr string, broker *MemoryBroker, repo *Repository, wsServer *Server) *Router {
+func NewRouter(addr string, broker Broker, repo *Repository, wsServer *Server) *Router {
 	mux := http.NewServeMux()
 	// WebSocket endpoint for real-time game updates
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {

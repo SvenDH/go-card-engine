@@ -16,7 +16,7 @@ var Three = NumberOrX{Number: 3}
 func TestCardParser(t *testing.T) {
 	parser := NewCardParser()
 
-	tests := []struct{
+	tests := []struct {
 		text string
 		card *Card
 	}{
@@ -24,7 +24,7 @@ func TestCardParser(t *testing.T) {
 			text: `Test {s}{1}
 			Unit`,
 			card: &Card{
-				Name: "Test",
+				Name:  "Test",
 				Types: []CardType{{"unit"}},
 				Costs: []CostType{
 					{Color: "s"},
@@ -37,11 +37,11 @@ func TestCardParser(t *testing.T) {
 			Unit - Human
 			1/1`,
 			card: &Card{
-				Name: "Soldier",
-				Types: []CardType{{"unit"}},
+				Name:     "Soldier",
+				Types:    []CardType{{"unit"}},
 				Subtypes: []SubType{{"human"}},
-				Costs: []CostType{{Color: "s"}},
-				Stats: &Stats{One, One},
+				Costs:    []CostType{{Color: "s"}},
+				Stats:    &Stats{One, One},
 			},
 		},
 		{
@@ -50,7 +50,7 @@ func TestCardParser(t *testing.T) {
 			Siege
 			2/2`,
 			card: &Card{
-				Name: "Knight",
+				Name:  "Knight",
 				Types: []CardType{{"unit"}},
 				Costs: []CostType{{Color: "s"}},
 				Abilities: []Ability{
@@ -65,12 +65,12 @@ func TestCardParser(t *testing.T) {
 			{t}: Add {s}.
 			`,
 			card: &Card{
-				Name: "Land",
+				Name:  "Land",
 				Types: []CardType{{"source"}},
 				Abilities: []Ability{
 					Activated{
 						Cost: []AbilityCost{
-							{Cost:&CostType{Deactivate: true}},
+							{Cost: &CostType{Deactivate: true}},
 						},
 						Effect: Composed{
 							[]Effect{
@@ -98,7 +98,7 @@ func TestCardParser(t *testing.T) {
 			{q}: Destroy target card.
 			1/1`,
 			card: &Card{
-				Name: "Super Soldier",
+				Name:  "Super Soldier",
 				Types: []CardType{{"unit"}},
 				Costs: []CostType{{Color: "s"}},
 				Abilities: []Ability{
@@ -129,7 +129,7 @@ func TestCardParser(t *testing.T) {
 			{t}: Wizard deals 1 damage to any target.
 			1/2`,
 			card: &Card{
-				Name: "Wizard",
+				Name:  "Wizard",
 				Types: []CardType{{"unit"}},
 				Costs: []CostType{
 					{Color: "w"},
@@ -167,8 +167,8 @@ func TestCardParser(t *testing.T) {
 			Destroy non-cup units.
 			3/2`,
 			card: &Card{
-				Name: "Test",
-				Types: []CardType{{"unit"}},
+				Name:     "Test",
+				Types:    []CardType{{"unit"}},
 				Subtypes: []SubType{{"beast"}, {"human"}},
 				Costs: []CostType{
 					{Color: "s"},
@@ -198,11 +198,10 @@ func TestCardParser(t *testing.T) {
 										&CardMatch{
 											[]CardTypeMatch{
 												{
-													Prefix:[]Prefix{
-														{NonColor:Color{"cup"}},
-														{Type:CardType{"units"}},
+													Prefix: []Prefix{
+														{NonColor: Color{"cup"}},
+														{Type: CardType{"units"}},
 													},
-													
 												},
 											},
 										},
@@ -211,7 +210,6 @@ func TestCardParser(t *testing.T) {
 							},
 						}, "",
 					},
-
 				},
 				Stats: &Stats{Three, Two},
 			},
@@ -222,7 +220,7 @@ func TestCardParser(t *testing.T) {
 			When Flashcaster is put on the board, draw a card.
 			1/1`,
 			card: &Card{
-				Name: "Flashcaster",
+				Name:  "Flashcaster",
 				Types: []CardType{{"unit"}},
 				Costs: []CostType{
 					{Number: NumberOrX{Number: 1}},
@@ -233,7 +231,7 @@ func TestCardParser(t *testing.T) {
 						Trigger{
 							Condition: &Condition{
 								CardCondition: &CardCondition{
-									Cards: CardMatch{[]CardTypeMatch{{Self: true}}},
+									Cards:  CardMatch{[]CardTypeMatch{{Self: true}}},
 									Enters: true,
 								},
 							},
@@ -265,12 +263,12 @@ func TestCardParser(t *testing.T) {
 	}
 }
 
-func newGame(players []*Player) *Game {
-	g := &Game{
-		players: players,
+func newGame(players []*Player) *GameState {
+	g := &GameState{
+		Players: players,
 		stack:   Stack{cards: []*AbilityInstance{}},
 	}
-	for _, player := range g.players {
+	for _, player := range g.Players {
 		player.game = g
 	}
 	return g
@@ -284,24 +282,24 @@ func newPlayer(
 ) *Player {
 	p := &Player{
 		life:    10,
-		deck:    Pile{cards: []*CardInstance{}},
-		hand:    Pile{cards: []*CardInstance{}},
-		pile:    Pile{cards: []*CardInstance{}},
-		board:   Board{slots: make([]*CardInstance, boardSize)},
+		Deck:    Pile{Cards: []*CardInstance{}},
+		Hand:    Pile{Cards: []*CardInstance{}},
+		Pile:    Pile{Cards: []*CardInstance{}},
+		Board:   Board{Slots: make([]*CardInstance, boardSize)},
 		essence: []string{},
 	}
 	for _, card := range deck {
-		p.deck.Add(NewCardInstance(card, p, ZoneDeck))
+		p.Deck.Add(NewCardInstance(card, p, ZoneDeck))
 	}
 	for _, card := range hand {
-		p.hand.Add(NewCardInstance(card, p, ZoneHand))
+		p.Hand.Add(NewCardInstance(card, p, ZoneHand))
 	}
 	for _, card := range pile {
-		p.hand.Add(NewCardInstance(card, p, ZoneHand))
+		p.Hand.Add(NewCardInstance(card, p, ZoneHand))
 	}
 	for i, card := range board {
 		if card != nil {
-			p.board.Insert(NewCardInstance(card, p, ZoneBoard), i)
+			p.Board.Insert(NewCardInstance(card, p, ZoneBoard), i)
 		}
 	}
 	return p
@@ -322,7 +320,7 @@ func TestGamePhases(t *testing.T) {
 		[]*Card{},
 		[]*Card{},
 	)
-	i := 1
+	i := 0
 	game := newGame([]*Player{p1})
 	game.turn = &Turn{game, p1, nil, 0, 0}
 	game.turn.Iter()(func(phase *Phase) bool {
@@ -335,18 +333,18 @@ func TestGamePhases(t *testing.T) {
 			if i != 2 {
 				t.Fatalf("Phase draw is not second phase: %v", phase)
 			}
-			if len(p1.deck.cards) != 1 {
+			if len(p1.Deck.Cards) != 1 {
 				t.Fatalf("Deck size not 1")
-			} else if len(p1.hand.cards) != 1 {
+			} else if len(p1.Hand.Cards) != 1 {
 				t.Fatalf("Hand does not contain card")
-			} else if p1.hand.cards[0].Card.Name != "card2" {
+			} else if p1.Hand.Cards[0].Card.Name != "card2" {
 				t.Fatalf("Hand does not contain top card from deck")
 			}
 		case PhasePlay:
 			if i != 3 {
 				t.Fatalf("Phase play is not third phase: %v", phase)
 			}
-			a1 := p1.hand.cards[0].Cast(1)
+			a1 := p1.Hand.Cards[0].Cast(1)
 			game.Play(a1)
 			if len(game.stack.cards) != 1 {
 				t.Fatalf("Stack size not 1")
@@ -359,7 +357,7 @@ func TestGamePhases(t *testing.T) {
 				t.Fatalf("Ability not the cast card")
 			}
 			a2.Resolve()
-			if p1.board.slots[1].Card.Name != "card2" {
+			if p1.Board.Slots[1].Card.Name != "card2" {
 				t.Fatalf("Board does not contain card from hand")
 			}
 		case PhaseEnd:
@@ -375,7 +373,7 @@ func TestGamePhases(t *testing.T) {
 
 func TestTrigger(t *testing.T) {
 	card := &Card{
-		Name: "Flashcaster",
+		Name:  "Flashcaster",
 		Types: []CardType{{"unit"}},
 		Costs: []CostType{
 			{Number: NumberOrX{Number: 1}},
@@ -386,7 +384,7 @@ func TestTrigger(t *testing.T) {
 				Trigger: Trigger{
 					Condition: &Condition{
 						CardCondition: &CardCondition{
-							Cards: CardMatch{M: []CardTypeMatch{{Self: true}}},
+							Cards:  CardMatch{M: []CardTypeMatch{{Self: true}}},
 							Enters: true,
 						},
 					},
@@ -416,7 +414,7 @@ func TestTrigger(t *testing.T) {
 	game.turn = &Turn{game, p1, nil, 0, 0}
 	game.turn.phase = &Phase{game.turn, p1, PhasePlay}
 
-	a1 := p1.hand.cards[0].Cast(1)
+	a1 := p1.Hand.Cards[0].Cast(1)
 	game.Play(a1)
 
 	if len(game.stack.cards) != 1 {
@@ -431,7 +429,7 @@ func TestTrigger(t *testing.T) {
 		t.Fatalf("Stack size not 1")
 	}
 	game.stack.Pop().Resolve()
-	if len(p1.hand.cards) != 1 {
+	if len(p1.Hand.Cards) != 1 {
 		t.Fatalf("Hand size not 1")
 	}
 }

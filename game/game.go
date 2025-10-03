@@ -11,6 +11,7 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
+type CardID int
 type PhaseType int8
 type EventType int8
 type Zone int8
@@ -151,91 +152,91 @@ type Event struct {
 }
 
 type Board struct {
-	slots []*CardInstance
+	Slots []*CardInstance
 }
 
 func (b *Board) Insert(card *CardInstance, index int) {
-	if index < 0 || index > len(b.slots) {
+	if index < 0 || index > len(b.Slots) {
 		panic("Invalid index")
 	}
-	b.slots[index] = card
+	b.Slots[index] = card
 }
 
 func (b *Board) Remove(card *CardInstance) {
-	for i, c := range b.slots {
+	for i, c := range b.Slots {
 		if c == card {
-			b.slots[i] = nil
+			b.Slots[i] = nil
 			return
 		}
 	}
 }
 
 type Pile struct {
-	cards []*CardInstance
+	Cards []*CardInstance
 }
 
-func (p *Pile) Add(cards ...*CardInstance) { p.cards = append(p.cards, cards...) }
+func (p *Pile) Add(cards ...*CardInstance) { p.Cards = append(p.Cards, cards...) }
 
 func (p *Pile) Remove(card *CardInstance) {
-	for i, c := range p.cards {
+	for i, c := range p.Cards {
 		if c == card {
-			p.cards = append(p.cards[:i], p.cards[i+1:]...)
+			p.Cards = append(p.Cards[:i], p.Cards[i+1:]...)
 			return
 		}
 	}
 }
 
 func (p *Pile) Pop() *CardInstance {
-	if len(p.cards) == 0 {
+	if len(p.Cards) == 0 {
 		return nil
 	}
-	card := p.cards[0]
-	p.cards = p.cards[1:]
+	card := p.Cards[0]
+	p.Cards = p.Cards[1:]
 	return card
 }
 
 func (p *Pile) Shuffle() {
-	for i := range p.cards {
+	for i := range p.Cards {
 		j := rand.Intn(i + 1)
-		p.cards[i], p.cards[j] = p.cards[j], p.cards[i]
+		p.Cards[i], p.Cards[j] = p.Cards[j], p.Cards[i]
 	}
 }
 
 func (p *Pile) Insert(card *CardInstance, i int) {
 	if i < 0 {
-		p.cards = append(p.cards, card)
+		p.Cards = append(p.Cards, card)
 	} else {
-		p.cards = append(p.cards[:i], append([]*CardInstance{card}, p.cards[i:]...)...)
+		p.Cards = append(p.Cards[:i], append([]*CardInstance{card}, p.Cards[i:]...)...)
 	}
 }
 
 type Player struct {
 	Id         ulid.ULID
-	game       *Game
+	game       *GameState
 	nr         int
 	life       int
-	deck       Pile
-	hand       Pile
-	pile       Pile
-	board      Board
+	Deck       Pile
+	Hand       Pile
+	Pile       Pile
+	Board      Board
 	essence    []string
 	turnsAfter int
-	cmdi       CommandI
+	Cmdi       CommandI
 }
 
 func NewPlayer(cmdi CommandI, deck ...*Card) *Player {
 	p := &Player{
 		Id:      ulid.Make(),
 		life:    0,
-		deck:    Pile{cards: []*CardInstance{}},
-		hand:    Pile{cards: []*CardInstance{}},
-		pile:    Pile{cards: []*CardInstance{}},
-		board:   Board{slots: make([]*CardInstance, boardSize)},
+		Deck:    Pile{Cards: []*CardInstance{}},
+		Hand:    Pile{Cards: []*CardInstance{}},
+		Pile:    Pile{Cards: []*CardInstance{}},
+		Board:   Board{Slots: make([]*CardInstance, boardSize)},
 		essence: []string{},
-		cmdi:    cmdi,
+		Cmdi:    cmdi,
 	}
 	for _, card := range deck {
-		p.deck.Add(NewCardInstance(card, p, ZoneDeck))
+		p.Deck.Add(NewCardInstance(card, p, ZoneDeck))
 	}
 	return p
 }
@@ -307,7 +308,7 @@ func (p *Player) prompt(
 ) bool {
 	var err error
 	var arr []int
-	if p.cmdi != nil {
+	if p.Cmdi != nil {
 		serializable := []string{}
 		for _, choice := range choices {
 			if card, ok := choice.(GameObject); ok {
@@ -318,7 +319,7 @@ func (p *Player) prompt(
 				serializable = append(serializable, fmt.Sprintf("%v", choice))
 			}
 		}
-		arr, err = p.cmdi.Prompt(cmd, serializable, num)
+		arr, err = p.Cmdi.Prompt(cmd, serializable, num)
 		*selected = append(*selected, arr...)
 	}
 	if err != nil {
@@ -342,7 +343,7 @@ func (p *Player) LoseLife(n int) {
 
 func (p *Player) Draw(n int) {
 	for i := 0; i < n; i++ {
-		card := p.deck.Pop()
+		card := p.Deck.Pop()
 		if card != nil {
 			p.Place(card, ZoneHand, 0)
 			p.game.Emit(EventOnDraw, card)
@@ -356,9 +357,9 @@ func (p *Player) Draw(n int) {
 func (p *Player) Shuffle(zone Zone) {
 	switch zone {
 	case ZoneDeck:
-		p.deck.Shuffle()
+		p.Deck.Shuffle()
 	case ZonePile:
-		p.pile.Shuffle()
+		p.Pile.Shuffle()
 	default:
 		panic("Invalid zone")
 	}
@@ -368,13 +369,13 @@ func (p *Player) Place(card *CardInstance, zone Zone, index int) {
 	card.Controller.Remove(card)
 	switch zone {
 	case ZoneDeck:
-		p.deck.Insert(card, index)
+		p.Deck.Insert(card, index)
 	case ZonePile:
-		p.pile.Insert(card, index)
+		p.Pile.Insert(card, index)
 	case ZoneHand:
-		p.hand.Add(card)
+		p.Hand.Add(card)
 	case ZoneBoard:
-		p.board.Insert(card, index)
+		p.Board.Insert(card, index)
 		card.Controller = p
 		p.game.Emit(EventOnEnterBoard, card, index)
 	default:
@@ -387,14 +388,14 @@ func (p *Player) Place(card *CardInstance, zone Zone, index int) {
 func (p *Player) Remove(card *CardInstance) {
 	switch card.zone {
 	case ZoneHand:
-		p.hand.Remove(card)
+		p.Hand.Remove(card)
 	case ZonePile:
-		p.pile.Remove(card)
+		p.Pile.Remove(card)
 	case ZoneBoard:
-		p.board.Remove(card)
+		p.Board.Remove(card)
 		p.game.Emit(EventOnLeaveBoard, card)
 	case ZoneDeck:
-		p.deck.Remove(card)
+		p.Deck.Remove(card)
 	default:
 		panic("Invalid zone")
 	}
@@ -411,28 +412,28 @@ func (p *Player) Match(a *AbilityInstance, m Match) bool {
 func (p *Player) Query(a *AbilityInstance, obj Match, zone *ZoneMatch) []any {
 	found := []any{}
 	if p.matchField(a, ZoneBoard, zone) {
-		for _, card := range p.board.slots {
+		for _, card := range p.Board.Slots {
 			if card != nil && (obj == nil || obj.Match(a, card)) {
 				found = append(found, card)
 			}
 		}
 	}
 	if p.matchField(a, ZoneHand, zone) {
-		for _, card := range p.hand.cards {
+		for _, card := range p.Hand.Cards {
 			if obj == nil || obj.Match(a, card) {
 				found = append(found, card)
 			}
 		}
 	}
 	if p.matchField(a, ZonePile, zone) {
-		for _, card := range p.pile.cards {
+		for _, card := range p.Pile.Cards {
 			if obj == nil || obj.Match(a, card) {
 				found = append(found, card)
 			}
 		}
 	}
 	if p.matchField(a, ZoneDeck, zone) {
-		for _, card := range p.deck.cards {
+		for _, card := range p.Deck.Cards {
 			if obj == nil || obj.Match(a, card) {
 				found = append(found, card)
 			}
@@ -570,12 +571,12 @@ func (p *Player) SourcesPerTurn() int {
 func (p *Player) GetPlayableCards() []any {
 	// TODO: get playable cards from other zones
 	playable := []any{}
-	for _, card := range p.hand.cards {
+	for _, card := range p.Hand.Cards {
 		if card.CanPlay() || card.CanSource() {
 			playable = append(playable, card)
 		}
 	}
-	for _, card := range p.board.slots {
+	for _, card := range p.Board.Slots {
 		if card != nil && card.CanDo() {
 			playable = append(playable, card)
 		}
@@ -592,7 +593,7 @@ func (p *Player) matchField(ability *AbilityInstance, place Zone, zone *ZoneMatc
 
 func (p *Player) freeFields(card *CardInstance) []any {
 	choices := []any{}
-	for i, card := range p.board.slots {
+	for i, card := range p.Board.Slots {
 		if card == nil {
 			choices = append(choices, i)
 		}
@@ -687,7 +688,7 @@ type Phase struct {
 }
 
 type Turn struct {
-	game          *Game
+	game          *GameState
 	player        *Player
 	phase         *Phase
 	turn          int
@@ -696,9 +697,9 @@ type Turn struct {
 
 type EventHandler func(*Event)
 
-type Game struct {
+type GameState struct {
 	Id            ulid.ULID
-	players       []*Player
+	Players       []*Player
 	stack         Stack
 	turn          *Turn
 	currentEvent  EventType
@@ -706,31 +707,31 @@ type Game struct {
 	eventHandlers map[EventType][]EventHandler
 }
 
-func NewGame(players ...*Player) *Game {
-	g := &Game{
+func NewGame(players ...*Player) *GameState {
+	g := &GameState{
 		Id:            ulid.Make(),
-		players:       players,
+		Players:       players,
 		stack:         Stack{cards: []*AbilityInstance{}},
 		eventHandlers: map[EventType][]EventHandler{},
 	}
-	for _, player := range g.players {
+	for _, player := range g.Players {
 		player.game = g
 	}
 	return g
 }
 
-func (g *Game) Run() {
-	if len(g.players) == 0 {
+func (g *GameState) Run() {
+	if len(g.Players) == 0 {
 		panic("No players")
 	}
-	nrPlayers := len(g.players)
+	nrPlayers := len(g.Players)
 	beginningPlayer := rand.Intn(nrPlayers)
 	for i := 0; i < nrPlayers; i++ {
-		g.players[(beginningPlayer+i)%nrPlayers].nr = i + 1
+		g.Players[(beginningPlayer+i)%nrPlayers].nr = i + 1
 	}
 	turn := 1
-	p := g.players[beginningPlayer]
-	for _, player := range g.players {
+	p := g.Players[beginningPlayer]
+	for _, player := range g.Players {
 		player.life = startLife
 		player.Draw(startCards)
 	}
@@ -752,24 +753,24 @@ func (g *Game) Run() {
 	}
 }
 
-func (g *Game) AddPlayer(p *Player) {
-	g.players = append(g.players, p)
+func (g *GameState) AddPlayer(p *Player) {
+	g.Players = append(g.Players, p)
 	p.game = g
 }
 
-func (g *Game) On(event EventType, handler EventHandler) {
+func (g *GameState) On(event EventType, handler EventHandler) {
 	if _, ok := g.eventHandlers[event]; !ok {
 		g.eventHandlers[event] = []EventHandler{}
 	}
 	g.eventHandlers[event] = append(g.eventHandlers[event], handler)
 }
 
-func (g *Game) Emit(event EventType, subject GameObject, args ...any) {
+func (g *GameState) Emit(event EventType, subject GameObject, args ...any) {
 	g.currentEvent = event
 	e := &Event{event, g.resolving, subject, args}
-	for _, player := range g.players {
+	for _, player := range g.Players {
 		// TODO: Check cards in other zones
-		for _, card := range player.board.slots {
+		for _, card := range player.Board.Slots {
 			if card != nil {
 				card.Trigger(e)
 			}
@@ -780,7 +781,7 @@ func (g *Game) Emit(event EventType, subject GameObject, args ...any) {
 	g.currentEvent = NoEvent
 }
 
-func (g *Game) callHandlers(e EventType, event *Event) {
+func (g *GameState) callHandlers(e EventType, event *Event) {
 	if handlers, ok := g.eventHandlers[e]; ok {
 		for _, f := range handlers {
 			f(event)
@@ -788,11 +789,11 @@ func (g *Game) callHandlers(e EventType, event *Event) {
 	}
 }
 
-func (g *Game) IsReaction() bool {
+func (g *GameState) IsReaction() bool {
 	return g.turn.phase.phase != PhasePlay || len(g.stack.cards) > 0
 }
 
-func (g *Game) Play(a *AbilityInstance) {
+func (g *GameState) Play(a *AbilityInstance) {
 	for i := 0; i < len(a.Effects); i++ {
 		e := &a.Effects[i]
 		if e.Match != nil {
@@ -802,7 +803,7 @@ func (g *Game) Play(a *AbilityInstance) {
 	g.stack.Add(a)
 }
 
-func (g *Game) Pick(a *AbilityInstance, o Match, z *ZoneMatch) []any {
+func (g *GameState) Pick(a *AbilityInstance, o Match, z *ZoneMatch) []any {
 	if o == nil {
 		found := g.Query(a, o, z, -1)
 		if len(found) == 0 {
@@ -837,15 +838,15 @@ func (g *Game) Pick(a *AbilityInstance, o Match, z *ZoneMatch) []any {
 	return g.Query(a, o, z, -1)
 }
 
-func (g *Game) Query(a *AbilityInstance, o Match, z *ZoneMatch, n int) []any {
+func (g *GameState) Query(a *AbilityInstance, o Match, z *ZoneMatch, n int) []any {
 	found := []any{}
-	for _, player := range g.players {
+	for _, player := range g.Players {
 		if player.Match(a, o) {
 			found = append(found, player)
 		}
 	}
 	if o != nil {
-		for _, player := range g.players {
+		for _, player := range g.Players {
 			found = append(found, player.Query(a, o, z)...)
 		}
 	}
@@ -860,7 +861,7 @@ func (t *Turn) Iter() iter.Seq[*Phase] {
 		t.phase = &Phase{t, t.player, PhaseStart}
 		t.game.Emit(EventAtStartPhase, t.player)
 		t.player.essence = t.player.essence[:0]
-		for _, card := range t.player.board.slots {
+		for _, card := range t.player.Board.Slots {
 			if card != nil {
 				card.Activate()
 			}
@@ -890,7 +891,7 @@ func (t *Turn) Iter() iter.Seq[*Phase] {
 func (p *Phase) Iter() iter.Seq[*Player] {
 	return func(yield func(*Player) bool) {
 		for {
-			for i := 0; i < len(p.turn.game.players); i++ {
+			for i := 0; i < len(p.turn.game.Players); i++ {
 				if !yield(p.priority) {
 					return
 				}
@@ -904,10 +905,10 @@ func (p *Phase) Iter() iter.Seq[*Player] {
 	}
 }
 
-func (g *Game) nextPlayer(p *Player) *Player {
-	for i, player := range g.players {
+func (g *GameState) nextPlayer(p *Player) *Player {
+	for i, player := range g.Players {
 		if player == p {
-			return g.players[(i+1)%len(g.players)]
+			return g.Players[(i+1)%len(g.Players)]
 		}
 	}
 	return nil
@@ -1125,6 +1126,7 @@ func (m Mods) Reverse(c *CardInstance) {
 }
 
 type Card struct {
+	ID        CardID
 	Name      string     `@Ident`
 	Costs     []CostType `@@*`
 	Types     []CardType `@@+`
@@ -1135,7 +1137,7 @@ type Card struct {
 }
 
 type CardInstance struct {
-	Id         ulid.ULID
+	ID         ulid.ULID
 	Card       *Card
 	activated  bool
 	flipped    bool
@@ -1149,7 +1151,7 @@ type CardInstance struct {
 
 func NewCardInstance(card *Card, owner *Player, zone Zone) *CardInstance {
 	c := &CardInstance{
-		Id:         ulid.Make(),
+		ID:         ulid.Make(),
 		Card:       card,
 		Owner:      owner,
 		Controller: owner,
@@ -1162,7 +1164,7 @@ func NewCardInstance(card *Card, owner *Player, zone Zone) *CardInstance {
 	return c
 }
 
-func (c *CardInstance) GetId() ulid.ULID { return c.Id }
+func (c *CardInstance) GetId() ulid.ULID { return c.ID }
 
 func (c *CardInstance) GetName() string { return c.Card.Name }
 
@@ -1379,13 +1381,13 @@ func (f Attack) Resolve(e *EffectInstance) {
 	for _, c := range e.Subjects {
 		card := c.(*CardInstance)
 		var o *Player
-		for _, p := range card.Controller.game.players {
+		for _, p := range card.Controller.game.Players {
 			if p != card.Controller {
 				o = p
 			}
 		}
 		if o != nil {
-			if other := o.board.slots[card.index]; other != nil {
+			if other := o.Board.Slots[card.index]; other != nil {
 				other.TakeDamage(card.stats.Power.Number)
 			} else {
 				o.LoseLife(card.stats.Power.Number)
