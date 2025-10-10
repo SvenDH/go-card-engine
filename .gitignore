@@ -41,3 +41,10 @@ dist/
 /npm-debug.log
 /assets
 /ui/assets
+
+# ONNX Runtime library (download separately)
+/lib/libonnxruntime.so*
+
+# Similarity cache
+/.cache/
+/models/*

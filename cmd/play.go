@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	screenWidth  = 600
-	screenHeight = 480
+	screenWidth  = 1920
+	screenHeight = 1080
 )
 
 // playCmd represents the play command
@@ -31,14 +31,14 @@ This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// Window setup
-		ebiten.SetWindowSize(screenWidth*2, screenHeight*2)
+		ebiten.SetWindowSize(screenWidth, screenHeight)
 		ebiten.SetWindowTitle("Tiles (Ebitengine Demo)")
 
 		// Start the game loop
 		prog := &ui.Program{
-			M: screens.NewCardGame(screenWidth / ui.TileSize, screenHeight / ui.TileSize),
-			Width: screenWidth,
-			Height: screenHeight,
+			M: screens.NewCardGame(screenWidth / 2 / ui.TileSize, screenHeight / 2 / ui.TileSize),
+			Width: screenWidth / 2,
+			Height: screenHeight / 2,
 		}
 		if err := ebiten.RunGame(prog); err != nil {
 			log.Fatal(err)

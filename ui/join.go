@@ -134,6 +134,9 @@ func JoinVertical(pos Position, tms ...*TileMap) *TileMap {
 				for _, line := range block {
 					tiles = append(tiles, line...)
 				}
+				for _, zone := range tms[i].Zones {
+					zones = append(zones, zone.Add(0, yOffset))
+				}
 				break
 			}
 
