@@ -1,563 +1,505 @@
 package screens
 
 import (
-	"github.com/SvenDH/go-card-engine/tween"
+	"fmt"
+	"math/rand"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/SvenDH/go-card-engine/game"
 	"github.com/SvenDH/go-card-engine/ui"
 )
 
-const (
-	CardLocDeck = iota
-	CardLocHand
-	CardLocBoard
-)
+var cardsParser = game.NewCardParser()
 
-type CardImage struct {
-	Name        string
-	Picture     *ui.TileMap
-	BorderColor ui.ColorIndex
-	BorderStyle ui.Border
-}
+var cardData []byte
+var cards []*game.Card
 
-func (c *CardImage) Init() ui.Cmd {
-	return nil
-}
-
-func (c *CardImage) Update(msg ui.Msg) (ui.Model, ui.Cmd) {
-	return c, nil
-}
-
-func (c *CardImage) View() *ui.TileMap {
-	borderStyle := ui.NewStyle().
-		Border(c.BorderStyle).
-		BorderForeground(c.BorderColor).
-		BorderBackground(ui.Colors["dark"])
-
-	topStyle := ui.NewStyle().
-		Foreground(ui.Colors["dark"]).
-		Background(c.BorderColor).
-		Width(c.Picture.W)
-
-	pic := c.Picture.View()
-	label := ui.Text(c.Name)
-	top := ui.JoinHorizontal(ui.Top, label.View())
-	top = topStyle.Render(top)
-	card := ui.JoinVertical(ui.Left, top, pic)
-	return borderStyle.Render(card)
-}
-
-type Card struct {
-	X, Y     int
-	Name     string
-	Picture  *ui.TileMap
-	Location int
-	OnClick  ui.Cmd
-	OnDrop   ui.Cmd
-
-	cardImage                *CardImage
-	input                    *ui.Zone
-	dragging                 bool
-	dragOffsetX, dragOffsetY int
-	originalX, originalY     int
-	// Animation
-	tweenX    *tween.Tween
-	tweenY    *tween.Tween
-	animating bool
-	// Visual state
-	hoverOffset int
-	hovered     bool
-}
-
-func (c *Card) Init() ui.Cmd {
-	c.cardImage = &CardImage{
-		Name:        c.Name,
-		Picture:     c.Picture,
-		BorderColor: ui.Colors["light-beige"],
-		BorderStyle: ui.Borders["card"],
+func init() {
+	var err error
+	cardData, err = os.ReadFile("assets/cards.txt")
+	if err != nil {
+		panic(err)
 	}
-	c.input = &ui.Zone{
-		M:         c.cardImage,
-		Draggable: true,
-		Capture:   true,
-		Enter: func(msg ui.Msg) ui.Cmd {
-			if !c.dragging {
-				c.hoverOffset = 2
-				c.hovered = true
-			}
-			return nil
-		},
-		Leave: func(msg ui.Msg) ui.Cmd {
-			if !c.dragging {
-				c.hoverOffset = 0
-				c.hovered = false
-			}
-			return nil
-		},
-		Click: func(msg ui.Msg) ui.Cmd {
-			c.dragging = true
-			// Store original position for returning if drop fails
-			c.originalX = c.X
-			c.originalY = c.Y
-			// Use zone's MouseX/MouseY which are properly zone-relative
-			c.dragOffsetX = c.input.MouseX
-			c.dragOffsetY = c.input.MouseY
-			// Set drag data for drop zones to access
-			c.input.DragData = c
-			return c.OnClick
-		},
-		Dragged: func(msg ui.Msg) ui.Cmd {
-			if c.dragging {
-				c.X = msg.(ui.MouseEvent).X/ui.TileSize - c.dragOffsetX
-				c.Y = msg.(ui.MouseEvent).Y/ui.TileSize - c.dragOffsetY
-			}
-			return nil
-		},
-		Release: func(msg ui.Msg) ui.Cmd {
-			if c.dragging {
-				c.dragging = false
-				return c.OnDrop
-			}
-			return nil
-		},
-	}
-	return nil
-}
-
-func (c *Card) Update(msg ui.Msg) (ui.Model, ui.Cmd) {
-	switch m := msg.(type) {
-	case ui.Tick:
-		// Update tween animations
-		if c.animating && !c.dragging && c.tweenX != nil && c.tweenY != nil {
-			xVal, xDone := c.tweenX.Update(m.DeltaTime)
-			yVal, yDone := c.tweenY.Update(m.DeltaTime)
-
-			c.X = int(xVal)
-			c.Y = int(yVal)
-
-			// Animation is done when both tweens are finished
-			if xDone && yDone {
-				c.animating = false
-				c.tweenX = nil
-				c.tweenY = nil
-			}
+	for _, txt := range strings.Split(string(cardData), "\n\n") {
+		card, err := cardsParser.Parse(txt, true)
+		if err != nil {
+			fmt.Println(err)
+			continue
 		}
+		fmt.Println(card)
+		cards = append(cards, card)
 	}
-	return c.input.Update(msg)
-}
-
-func (c *Card) AnimateTo(x, y int) {
-	// Create new tweens for smooth animation
-	duration := float32(0.3) // 0.3 seconds duration
-	c.tweenX = tween.New(float32(c.X), float32(x), duration, tween.OutQuad)
-	c.tweenY = tween.New(float32(c.Y), float32(y), duration, tween.OutQuad)
-	c.animating = true
-}
-
-func (c *Card) View() *ui.TileMap {
-	return c.input.View()
-}
-
-func (c *Card) GetDrawY() int {
-	return c.Y - c.hoverOffset
-}
-
-type Lanes struct {
-	Game      *CardGame
-	zones     []ui.Model
-	cards     []ui.Model
-	cardStyle ui.Style
-}
-
-func (l *Lanes) Init() ui.Cmd {
-	zoneStyle := ui.NewStyle().
-		Margin(1).
-		Border(ui.Borders["roundheavy"]).
-		BorderForeground(ui.Colors["dark-brown"])
-
-	l.zones = make([]ui.Model, 5)
-	for i := range l.zones {
-		laneIndex := i // Capture loop variable
-		l.zones[i] = &ui.Zone{
-			M:         zoneStyle.Render(ui.NewTileMap(10, 12, nil)),
-			Droppable: true,
-			Drop: func(msg ui.Msg) ui.Cmd {
-				// Get dragged card from zone's DragData
-				event := msg.(ui.MouseEvent)
-				if event.Zone != nil && event.Zone.DragData != nil {
-					card := event.Zone.DragData.(*Card)
-					zone := l.zones[laneIndex].(*ui.Zone)
-					if l.Game.CanDropCard(card, zone) {
-						// Remove from hand and add to board
-						wasInHand := card.Location == CardLocHand
-						l.Game.RemoveCard(card)
-						card.Location = CardLocBoard
-						l.cards[laneIndex] = card
-						// Animate to zone center (accounting for card border width of 2)
-						targetX := zone.X + (zone.W-card.Picture.W-2)/2
-						targetY := zone.Y + (zone.H-card.Picture.H-2)/2
-						card.AnimateTo(targetX, targetY)
-						// Card is no longer in hand, disable hover
-						card.hovered = false
-						card.hoverOffset = 0
-						// Rearrange remaining cards in hand if this card came from hand
-						if wasInHand {
-							l.Game.LayoutHand()
-						}
-					} else {
-						// Can't drop here, animate back to original position
-						card.AnimateTo(card.originalX, card.originalY)
-					}
-				}
-				return nil
-			},
-		}
-	}
-	l.cards = make([]ui.Model, 5)
-	l.cardStyle = ui.NewStyle().Margin(1)
-	return nil
-}
-
-func (l *Lanes) Update(msg ui.Msg) (ui.Model, ui.Cmd) {
-	var cmd ui.Cmd
-	var cmds []ui.Cmd
-	for i, zone := range l.zones {
-		l.zones[i], cmd = zone.Update(msg)
-		if cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	}
-	for _, card := range l.cards {
-		if card != nil {
-			_, cmd = card.Update(msg)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
-	}
-	return l, ui.Batch(cmds...)
-}
-
-func (l *Lanes) View() *ui.TileMap {
-	// Render all zone backgrounds
-	tms := make([]*ui.TileMap, len(l.zones))
-	for i, zone := range l.zones {
-		tms[i] = zone.View()
-	}
-	return ui.JoinHorizontal(ui.Top, tms...)
-}
-
-func (l *Lanes) Remove(card *Card) bool {
-	for i, c := range l.cards {
-		if c.(*Card) == card {
-			// Remove card from board
-			l.cards = append(l.cards[:i], l.cards[i+1:]...)
-			return true
-		}
-	}
-	return false
 }
 
 type CardGame struct {
-	W, H               int
-	deck               []ui.Model
-	hand               []ui.Model
-	handZone           *ui.Zone
-	drawButton         *ui.Zone
-	playerLanes        ui.Model
-	enemyLanes         ui.Model
-	playerResources    []ui.Model
-	enemyResources     []ui.Model
-	playerResourceZone *ui.Zone
-	enemyResourceZone  *ui.Zone
+	W, H int
+
+	hand                    *Hand
+	playerLanes             ui.Model
+	enemyLanes              ui.Model
+	playerResources         *ResourceZone
+	enemyResources          *ResourceZone
+	skipButton              *ui.Zone
+	skipButtonHovered       bool
+	prompting               bool
+	phaseLabel              *ui.Zone
+	currentPhase            string
+	currentPlayer           string
+	validFields             map[int]bool
+	selectedCard            *Card
+	enemySelectedCard       *Card
+	playableCards           []*Card
+	abilityMenu             []*ui.Zone
+	abilityMenuHovered      []bool
+	abilityChoices          []any
+	promptingAbility        bool
+	stack                   *Stack
+	playerLife              int
+	enemyLife               int
+
+	gameState *game.GameState
+	player    *game.Player
+	enemy     *game.Player
+	cardMap   map[int]*Card
 }
 
 func NewCardGame(width, height int) *CardGame {
 	e := &CardGame{
-		W:               width,
-		H:               height,
-		deck:            make([]ui.Model, 0),
-		hand:            make([]ui.Model, 0),
-		playerLanes:     &Lanes{},
-		enemyLanes:      &Lanes{},
-		playerResources: make([]ui.Model, 0),
-		enemyResources:  make([]ui.Model, 0),
+		W:           width,
+		H:           height,
+		playerLanes: &Lanes{},
+		enemyLanes:  &Lanes{},
+		cardMap:     make(map[int]*Card),
 	}
 	e.playerLanes.(*Lanes).Game = e
+	e.playerLanes.(*Lanes).isPlayer = true
 	e.enemyLanes.(*Lanes).Game = e
+	e.enemyLanes.(*Lanes).isPlayer = false
 
-	tm := ui.NewStyle().
-		Border(ui.Borders["rounded"]).
-		BorderForeground(ui.Colors["dark-gray"]).
-		Background(ui.Colors["dark"]).
-		Render(ui.NewTileMap(width-15, 12, nil))
+	e.hand = NewHand(e, width, height)
+	e.playerResources = NewResourceZone(e, width, height, true)
+	e.enemyResources = NewResourceZone(e, width, height, false)
 
-	e.handZone = &ui.Zone{
-		M:         tm,
-		W:         tm.W,
-		H:         tm.H,
-		Droppable: true,
-		Drop: func(msg ui.Msg) ui.Cmd {
-			// Handle dropping cards back to hand
-			event := msg.(ui.MouseEvent)
-			if event.Zone != nil && event.Zone.DragData != nil {
-				card := event.Zone.DragData.(*Card)
-				if e.CanDropCard(card, e.handZone) {
-					// Check if card is from board - if so, move it back to hand
-					if e.RemoveCard(card) {
-						card.Location = CardLocHand
-						e.hand = append(e.hand, card)
-						e.LayoutHand()
-					}
-				} else {
-					// Can't drop here, animate back to original position
-					card.AnimateTo(card.originalX, card.originalY)
-				}
+	// Create skip button
+	e.skipButton = &ui.Zone{
+		M:       ui.NewTileMap(8, 3, nil),
+		W:       8,
+		H:       3,
+		Capture: true,
+		Enter: func(msg ui.Msg) ui.Cmd {
+			e.skipButtonHovered = true
+			return nil
+		},
+		Leave: func(msg ui.Msg) ui.Cmd {
+			e.skipButtonHovered = false
+			return nil
+		},
+		Click: func(msg ui.Msg) ui.Cmd {
+			if e.prompting && e.player != nil {
+				// Send skip code to player
+				e.player.Send(game.Msg{Selected: []int{game.SkipCode}})
+				e.prompting = false
+				e.promptingAbility = false
+				e.abilityMenu = []*ui.Zone{}
+				e.abilityMenuHovered = []bool{}
+				e.abilityChoices = []any{}
 			}
 			return nil
 		},
 	}
 
-	// Create player resource zone
-	playerResourceTM := ui.NewStyle().
-		Border(ui.Borders["rounded"]).
-		BorderForeground(ui.Colors["green"]).
-		Background(ui.Colors["dark"]).
-		Render(ui.NewTileMap(width-15, 14, nil))
-
-	e.playerResourceZone = &ui.Zone{
-		M:         playerResourceTM,
-		W:         playerResourceTM.W,
-		H:         playerResourceTM.H,
-		Droppable: true,
-		Drop: func(msg ui.Msg) ui.Cmd {
-			// Handle dropping resource cards
-			event := msg.(ui.MouseEvent)
-			if event.Zone != nil && event.Zone.DragData != nil {
-				card := event.Zone.DragData.(*Card)
-				// Remove from previous location
-				e.RemoveCard(card)
-				// Add to player resources
-				card.Location = CardLocBoard
-				e.playerResources = append(e.playerResources, card)
-				// Animate to resource zone
-				card.AnimateTo(e.playerResourceZone.X+2, e.playerResourceZone.Y+2)
-			}
-			return nil
-		},
+	// Create phase label
+	e.phaseLabel = &ui.Zone{
+		M: ui.NewTileMap(20, 3, nil),
+		W: 20,
+		H: 3,
 	}
+	e.currentPhase = "Start"
+	e.currentPlayer = "Player"
+	e.playerLife = 20
+	e.enemyLife = 20
+	e.cardMap = make(map[int]*Card)
+	e.validFields = make(map[int]bool)
+	e.abilityMenu = []*ui.Zone{}
+	e.abilityMenuHovered = []bool{}
+	e.abilityChoices = []any{}
+	e.promptingAbility = false
 
-	// Create enemy resource zone
-	enemyResourceTM := ui.NewStyle().
-		Border(ui.Borders["rounded"]).
-		BorderForeground(ui.Colors["red"]).
-		Background(ui.Colors["dark"]).
-		Render(ui.NewTileMap(width-15, 14, nil))
-
-	e.enemyResourceZone = &ui.Zone{
-		M:         enemyResourceTM,
-		W:         enemyResourceTM.W,
-		H:         enemyResourceTM.H,
-		Droppable: true,
-		Drop: func(msg ui.Msg) ui.Cmd {
-			// Handle dropping resource cards
-			event := msg.(ui.MouseEvent)
-			if event.Zone != nil && event.Zone.DragData != nil {
-				card := event.Zone.DragData.(*Card)
-				// Remove from previous location
-				e.RemoveCard(card)
-				// Add to enemy resources
-				card.Location = CardLocBoard
-				e.enemyResources = append(e.enemyResources, card)
-				// Animate to resource zone
-				card.AnimateTo(e.enemyResourceZone.X+2, e.enemyResourceZone.Y+2)
-			}
-			return nil
-		},
-	}
+	// Create stack zone
+	e.stack = NewStack(e)
 
 	return e
 }
 
 func (e *CardGame) Init() ui.Cmd {
+	// Initialize random seed for bot
+	rand.Seed(time.Now().UnixNano())
+
 	e.playerLanes.Init()
 	e.enemyLanes.Init()
 
-	img, _ := ui.LoadTileMap("assets/frog10x12.txt")
+	// Deck is no longer pre-created - cards are created on-demand when drawn
 
-	// Create deck with 15 cards
-	for range 15 {
-		card := &Card{
-			X:        e.W - 13,
-			Y:        3,
-			Name:     "Frog",
-			Picture:  img,
-			Location: CardLocDeck,
-		}
-		card.OnClick = func() ui.Msg {
-			return nil
-		}
-		card.OnDrop = func() ui.Msg {
-			// Always animate back to original position as fallback
-			// If a zone's Drop handler accepts this card, it will call AnimateTo
-			// with a new target, which will override this animation
-			card.AnimateTo(card.originalX, card.originalY)
-			return nil
-		}
-		card.Init()
-		e.deck = append(e.deck, card)
-	}
-
-	// Create draw button
-	e.drawButton = &ui.Zone{
-		M: ui.Text("DRAW"),
-		Click: func(msg ui.Msg) ui.Cmd {
-			e.DrawCard()
-			return nil
-		},
-		Capture: true,
-	}
+	go e.StartGame()
 
 	return nil
 }
 
-func (e *CardGame) DrawCard() {
-	if len(e.deck) > 0 {
-		// Take card from top of deck
-		card := e.deck[len(e.deck)-1].(*Card)
-		e.deck = e.deck[:len(e.deck)-1]
+func (e *CardGame) StartGame() {
+	e.gameState = game.NewGame()
+	e.player = e.gameState.AddPlayer(cards...)
+	e.enemy = e.gameState.AddPlayer(cards...)
+	e.gameState.On(game.AllEvents, e.eventHandler)
+	e.gameState.Run()
+}
 
-		// Add to hand first
-		card.Location = CardLocHand
-		e.hand = append(e.hand, card)
+func (e *CardGame) CreateCard(cardInstance *game.CardInstance) *Card {
+	img, _ := ui.LoadTileMap("assets/frog10x12.txt")
+	// Position cards at deck location (top-right)
+	deckX := e.W - 13
+	deckY := 3
+	card := &Card{
+		X:            deckX,
+		Y:            deckY,
+		Name:         cardInstance.Card.Name,
+		Picture:      img,
+		Location:     CardLocDeck,
+		game:         e,
+		cardInstance: cardInstance,
+	}
+	// Set original position for animations
+	card.originalX = card.X
+	card.originalY = card.Y
+	card.OnClick = func() ui.Msg {
+		return nil
+	}
+	card.OnDrop = func() ui.Msg {
+		card.AnimateTo(card.originalX, card.originalY)
+		return nil
+	}
+	card.Init()
+	e.cardMap[cardInstance.GetId()] = card
+	return card
+}
 
-		// Recalculate all card positions with new hand size
-		e.LayoutHand()
+func (e *CardGame) Draw(cardInstance *game.CardInstance) {
+	// Create new card at deck location
+	card := e.CreateCard(cardInstance)
+
+	// Add to hand
+	e.hand.AddCard(card)
+}
+
+func (e *CardGame) PromptCard(choices []any) {
+	for _, card := range e.hand.Cards() {
+		card.(*Card).Highlighted = false
+	}
+	e.playableCards = []*Card{}
+	for _, choice := range choices {
+		if card, ok := e.cardMap[choice.(*game.CardInstance).GetId()]; ok {
+			card.Highlighted = true
+			e.playableCards = append(e.playableCards, card)
+		}
 	}
 }
 
-func (e *CardGame) LayoutHand() {
-	if len(e.hand) == 0 {
-		return
-	}
-
-	// Get first card to know card width
-	cardWidth := e.hand[0].(*Card).Picture.W + 2 // +2 for border
-
-	// Calculate spacing based on hand size
-	handWidth := e.handZone.W - 4 // Margins
-	maxSpacing := 11
-	totalCardWidth := len(e.hand) * cardWidth
-
-	var spacing int
-	if totalCardWidth > handWidth {
-		// Cards need to overlap
-		spacing = (handWidth - cardWidth) / (len(e.hand) - 1)
-		if spacing < 1 {
-			spacing = 1 // Minimum spacing to keep cards visible
+func (e *CardGame) PromptField(choices []any) {
+	// Clear previous valid fields
+	e.validFields = make(map[int]bool)
+	for _, choice := range choices {
+		if fieldIdx, ok := choice.(int); ok {
+			e.validFields[fieldIdx] = true
 		}
+	}
+}
+
+func (e *CardGame) PromptAbility(choices []any) {
+	// Store choices and create menu zones
+	e.abilityChoices = choices
+	e.abilityMenu = make([]*ui.Zone, len(choices))
+	e.abilityMenuHovered = make([]bool, len(choices))
+
+	for i := range choices {
+		choiceIndex := i // Capture loop variable
+		e.abilityMenu[i] = &ui.Zone{
+			M:       ui.NewTileMap(30, 3, nil),
+			W:       30,
+			H:       3,
+			Capture: true,
+			Enter: func(msg ui.Msg) ui.Cmd {
+				e.abilityMenuHovered[choiceIndex] = true
+				return nil
+			},
+			Leave: func(msg ui.Msg) ui.Cmd {
+				e.abilityMenuHovered[choiceIndex] = false
+				return nil
+			},
+			Click: func(msg ui.Msg) ui.Cmd {
+				if e.promptingAbility && e.player != nil {
+					// Send ability selection to player
+					go func() {
+						e.player.Send(game.Msg{Selected: []int{choiceIndex}})
+					}()
+					e.prompting = false
+					e.promptingAbility = false
+					e.abilityMenu = []*ui.Zone{}
+					e.abilityMenuHovered = []bool{}
+					e.abilityChoices = []any{}
+				}
+				return nil
+			},
+		}
+	}
+}
+
+func (e *CardGame) eventHandler(event *game.Event) {
+	player := event.Player
+
+	// Handle card reveal events
+	if event.Event == game.EventOnDraw || event.Event == game.EventOnEnterBoard {
+		// TODO: handle card reveal events
+	}
+	fmt.Println(event)
+	switch event.Event {
+	case game.EventOnDraw:
+		if player == e.player {
+			e.Draw(event.Args[0].(*game.CardInstance))
+		} else {
+			// Draw card for enemy
+			cardInstance := event.Args[0].(*game.CardInstance)
+			if _, exists := e.cardMap[cardInstance.GetId()]; !exists {
+				e.CreateCard(cardInstance)
+			}
+		}
+	case game.EventOnEnterBoard:
+		// Move card from stack to actual field position
+		if len(event.Args) >= 2 {
+			cardInstance := event.Args[0].(*game.CardInstance)
+			fieldIndex := event.Args[1].(int)
+
+			// Create card if it doesn't exist (for enemy cards)
+			card, ok := e.cardMap[cardInstance.GetId()]
+			if !ok {
+				card = e.CreateCard(cardInstance)
+				ok = true
+			}
+
+			// For ALL enemy cards entering the board, position at stack first
+			if ok && player != e.player {
+				stackX := e.W/2 - 6
+				stackY := e.H/2 - 8
+				card.X = stackX + 1
+				card.Y = stackY + 1
+				card.originalX = card.X
+				card.originalY = card.Y
+			}
+
+			if ok {
+				card.Location = CardLocBoard
+
+				// Determine which lanes to use
+				var lanes *Lanes
+				if player == e.player {
+					lanes = e.playerLanes.(*Lanes)
+				} else {
+					lanes = e.enemyLanes.(*Lanes)
+				}
+
+				// Place card in the lane
+				lanes.cards[fieldIndex] = card
+				zone := lanes.zones[fieldIndex].zone
+
+				// Calculate target position
+				targetX := zone.X + (zone.W-card.Picture.W-2)/2
+				targetY := zone.Y + (zone.H-card.Picture.H-2)/2 - 1
+
+				// Update original position for this card's new home
+				card.originalX = targetX
+				card.originalY = targetY
+
+				// Animate to zone center
+				card.AnimateTo(targetX, targetY)
+
+				// Remove highlight when leaving stack
+				card.Highlighted = false
+
+				// Clear stack if this was the stacked card
+				if e.stack.GetCard() == card {
+					e.stack.Clear()
+				}
+				// Clear enemy selected card if this was it
+				if e.enemySelectedCard == card {
+					e.enemySelectedCard = nil
+				}
+			}
+		}
+	case game.EventAtStartPhase:
+		e.currentPhase = "Start"
+		e.updateCurrentPlayer(player)
+	case game.EventAtDrawPhase:
+		e.currentPhase = "Draw"
+		e.updateCurrentPlayer(player)
+	case game.EventAtPlayPhase:
+		e.currentPhase = "Play"
+		e.updateCurrentPlayer(player)
+	case game.EventAtEndPhase:
+		e.currentPhase = "End"
+		e.updateCurrentPlayer(player)
+	case game.EventOnGainLife:
+		if len(event.Args) > 0 {
+			amount := event.Args[0].(int)
+			if player == e.player {
+				e.playerLife += amount
+			} else {
+				e.enemyLife += amount
+			}
+		}
+	case game.EventOnLoseLife:
+		if len(event.Args) > 0 {
+			amount := event.Args[0].(int)
+			if player == e.player {
+				e.playerLife -= amount
+			} else {
+				e.enemyLife -= amount
+			}
+		}
+	case game.EventOnAttack:
+		// Trigger attack bump animation for the attacking card
+		if len(event.Args) > 0 {
+			if cardInst, ok := event.Args[0].(*game.CardInstance); ok {
+				if card, exists := e.cardMap[cardInst.GetId()]; exists {
+					// Direction: 1 for player attacking down, -1 for enemy attacking up
+					direction := 1
+					if player != e.player {
+						direction = -1
+					}
+					card.AnimateBump(direction)
+				}
+			}
+		}
+	case game.EventPromptCard:
+		if player == e.player {
+			e.prompting = true
+			e.PromptCard(event.Args[1:])
+		} else {
+			e.enemyBotPromptCard(event.Args[1:], player)
+		}
+	case game.EventPromptField:
+		if player == e.player {
+			e.PromptField(event.Args[1:])
+		} else {
+			// Put enemy card on stack - use the tracked enemy selected card
+			if e.enemySelectedCard != nil {
+				// Set card on stack (fieldIndex will be determined by bot)
+				e.stack.SetCard(e.enemySelectedCard, 0)
+			}
+			e.enemyBotPromptField(event.Args[1:])
+		}
+	case game.EventPromptAbility:
+		if player == e.player {
+			e.prompting = true
+			e.promptingAbility = true
+			e.PromptAbility(event.Args[1:])
+		} else {
+			e.enemyBotPromptAbility(event.Args[1:])
+		}
+	case game.EventPromptTarget:
+		if player == e.player {
+			e.prompting = true
+		} else {
+			e.enemyBotPromptTarget(event.Args[1:])
+		}
+	case game.EventPromptSource:
+		if player == e.player {
+			e.prompting = true
+		} else {
+			e.enemyBotPromptSource(event.Args[1:])
+		}
+	case game.EventPromptDiscard:
+		if player == e.player {
+			e.prompting = true
+		} else {
+			e.enemyBotPromptDiscard(event.Args[1:])
+		}
+	}
+}
+
+func (e *CardGame) updateCurrentPlayer(player *game.Player) {
+	if player == e.player {
+		e.currentPlayer = "Player"
+	} else if player == e.enemy {
+		e.currentPlayer = "Enemy"
 	} else {
-		// Cards can spread out
-		spacing = maxSpacing
-		if len(e.hand) > 1 {
-			availableSpace := handWidth - cardWidth
-			calculatedSpacing := availableSpace / (len(e.hand) - 1)
-			if calculatedSpacing < spacing {
-				spacing = calculatedSpacing
-			}
-		}
-	}
-
-	// Calculate total width of hand
-	totalWidth := cardWidth + (len(e.hand)-1)*spacing
-	startX := e.handZone.X + (handWidth-totalWidth)/2 + 2
-
-	// Position cards with arc effect
-	for i, card := range e.hand {
-		// X position
-		targetX := startX + i*spacing
-
-		// Y position with arc (cards at edges are higher)
-		baseY := e.handZone.Y - 2 // Raised higher
-		// Calculate normalized position from center (-1 to 1)
-		center := float64(len(e.hand)-1) / 2.0
-		normPos := (float64(i) - center) / (center + 0.5)
-		// Arc curve (parabola)
-		arcOffset := int(normPos * normPos * 4) // Cards at edges lift up by 4 tiles
-		targetY := baseY + arcOffset
-
-		// Animate to new position
-		// Always create new animation - this will override any existing tween
-		card.(*Card).AnimateTo(targetX, targetY)
+		e.currentPlayer = "Unknown"
 	}
 }
 
-func (e *CardGame) CanDropCard(card *Card, zone *ui.Zone) bool {
-	// For now, always return true
-	return true
+// LayoutHand delegates to the hand component
+func (e *CardGame) LayoutHand() {
+	e.hand.Layout()
 }
 
-func (e *CardGame) InAnyDropZone(card *Card) bool {
-	// Check if card is over handZone or any lane zone
-	x, y := card.X/ui.TileSize, card.Y/ui.TileSize
-
-	if e.handZone.InBounds(x, y) {
-		return true
+// Helper to find any currently dragged card
+func (e *CardGame) getDraggedCard() *Card {
+	// Check hand
+	for _, c := range e.hand.Cards() {
+		if c.(*Card).dragging {
+			return c.(*Card)
+		}
 	}
-
-	// Check player lanes
-	if lanes, ok := e.playerLanes.(*Lanes); ok {
-		for _, zone := range lanes.zones {
-			if z, ok := zone.(*ui.Zone); ok && z.InBounds(x, y) {
-				return true
+	// Check all card collections
+	allCollections := [][]ui.Model{
+		e.playerResources.Cards(),
+		e.enemyResources.Cards(),
+		e.playerLanes.(*Lanes).cards,
+		e.enemyLanes.(*Lanes).cards,
+	}
+	for _, cards := range allCollections {
+		for _, c := range cards {
+			if c != nil && c.(*Card).dragging {
+				return c.(*Card)
 			}
 		}
 	}
+	return nil
+}
 
-	// Check enemy lanes
-	if lanes, ok := e.enemyLanes.(*Lanes); ok {
-		for _, zone := range lanes.zones {
-			if z, ok := zone.(*ui.Zone); ok && z.InBounds(x, y) {
-				return true
-			}
+// Update zone hover states based on dragged card position
+func (e *CardGame) updateDragHoverStates() {
+	// Zones now handle their own hover state through Enter/Leave events
+	// This method can be simplified or removed
+}
+
+func (e *CardGame) CanDropCard(card *Card, fieldIndex int) bool {
+	// Only allow dropping selected card in valid fields
+	if e.selectedCard != nil && e.selectedCard == card {
+		if len(e.validFields) > 0 {
+			return e.validFields[fieldIndex]
 		}
 	}
-
-	// Check resource zones
-	if e.playerResourceZone != nil && e.playerResourceZone.InBounds(x, y) {
-		return true
-	}
-	if e.enemyResourceZone != nil && e.enemyResourceZone.InBounds(x, y) {
-		return true
-	}
-
 	return false
 }
 
-func (e *CardGame) TryDropCard(card *Card, x, y int) {
-	// Check hand zone
-	if e.handZone.InBounds(x, y) {
-		if e.CanDropCard(card, e.handZone) {
-			// Check if card is from board - if so, move it back to hand
-			if e.RemoveCard(card) {
-				e.hand = append(e.hand, card)
-				// LayoutHand will be called after this
+// Helper to remove card from a collection and optionally relayout
+func removeCardFromCollection(card *Card, collection []ui.Model, onRemove func()) ([]ui.Model, bool) {
+	for i, c := range collection {
+		if c.(*Card) == card {
+			result := append(collection[:i], collection[i+1:]...)
+			if onRemove != nil {
+				onRemove()
 			}
-			// If already in hand, LayoutHand will just reposition
-			return
+			return result, true
 		}
 	}
-	// Not in any zone, animate back to original position
-	card.AnimateTo(card.originalX, card.originalY)
+	return collection, false
 }
 
 func (e *CardGame) RemoveCard(card *Card) bool {
 	// Remove from hand
 	if card.Location == CardLocHand {
-		for i, c := range e.hand {
-			if c == card {
-				e.hand = append(e.hand[:i], e.hand[i+1:]...)
-				return true
-			}
-		}
+		return e.hand.RemoveCard(card)
 	}
 
 	// Remove from board
@@ -579,64 +521,91 @@ func (e *CardGame) RemoveCard(card *Card) bool {
 			}
 		}
 		// Check player resources
-		for i, c := range e.playerResources {
-			if c.(*Card) == card {
-				e.playerResources = append(e.playerResources[:i], e.playerResources[i+1:]...)
-				return true
-			}
+		if e.playerResources.RemoveCard(card) {
+			return true
 		}
+
 		// Check enemy resources
-		for i, c := range e.enemyResources {
-			if c.(*Card) == card {
-				e.enemyResources = append(e.enemyResources[:i], e.enemyResources[i+1:]...)
-				return true
-			}
+		if e.enemyResources.RemoveCard(card) {
+			return true
 		}
 	}
 
 	return false
 }
 
-func (e *CardGame) Update(msg ui.Msg) (ui.Model, ui.Cmd) {
-	var cmd ui.Cmd
+// Helper to update a collection of models and collect commands
+func updateModels(msg ui.Msg, models []ui.Model) []ui.Cmd {
 	var cmds []ui.Cmd
-	// Update draw button
-	if e.drawButton != nil {
-		_, cmd := e.drawButton.Update(msg)
+	for _, m := range models {
+		if m != nil {
+			_, cmd := m.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+	}
+	return cmds
+}
+
+// Helper to update a single zone and return command
+func updateZone(msg ui.Msg, zone *ui.Zone) ui.Cmd {
+	if zone != nil {
+		_, cmd := zone.Update(msg)
+		return cmd
+	}
+	return nil
+}
+
+func (e *CardGame) Update(msg ui.Msg) (ui.Model, ui.Cmd) {
+	var cmds []ui.Cmd
+
+	// Update skip button
+	if cmd := updateZone(msg, e.skipButton); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
 
-	// Update cards in hand
-	for _, c := range e.hand {
-		_, cmd := c.Update(msg)
-		cmds = append(cmds, cmd)
+	// Update ability menu
+	for _, zone := range e.abilityMenu {
+		if cmd := updateZone(msg, zone); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	}
 
-	e.playerLanes, cmd = e.playerLanes.Update(msg)
-	cmds = append(cmds, cmd)
-
-	e.enemyLanes, cmd = e.enemyLanes.Update(msg)
-	cmds = append(cmds, cmd)
+	// Update phase label
+	if cmd := updateZone(msg, e.phaseLabel); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 
 	// Update resource zones
-	if e.playerResourceZone != nil {
-		_, cmd = e.playerResourceZone.Update(msg)
+	if _, cmd := e.playerResources.Update(msg); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	if e.enemyResourceZone != nil {
-		_, cmd = e.enemyResourceZone.Update(msg)
+	if _, cmd := e.enemyResources.Update(msg); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
 
-	// Update resource cards
-	for _, c := range e.playerResources {
-		_, cmd = c.Update(msg)
+	// Update lanes
+	var cmd ui.Cmd
+	e.playerLanes, cmd = e.playerLanes.Update(msg)
+	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	for _, c := range e.enemyResources {
-		_, cmd = c.Update(msg)
+	e.enemyLanes, cmd = e.enemyLanes.Update(msg)
+	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}
+
+	// Update hand and all cards
+	if _, cmd := e.hand.Update(msg); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	cmds = append(cmds, updateModels(msg, e.hand.Cards())...)
+	cmds = append(cmds, updateModels(msg, e.playerResources.Cards())...)
+	cmds = append(cmds, updateModels(msg, e.enemyResources.Cards())...)
+
+	// Update zone hover states when dragging
+	e.updateDragHoverStates()
 
 	return e, ui.Batch(cmds...)
 }
@@ -644,133 +613,26 @@ func (e *CardGame) Update(msg ui.Msg) (ui.Model, ui.Cmd) {
 func (e *CardGame) View() *ui.TileMap {
 	screen := ui.NewTileMap(e.W, e.H, nil)
 
-	// Draw hand zone
-	screen = screen.Overlay(e.handZone.View(), 0, e.H-12)
+	// Draw hand zone (positioned to cover raised cards)
+	screen = screen.Overlay(e.hand.View(), 0, e.H-10)
 
-	// Draw enemy lanes at the top
+	// Draw enemy lanes at the top with resource zones
 	screen = screen.Overlay(ui.JoinVertical(
 		ui.Center,
-		e.enemyResourceZone.View(),
+		renderZoneWithHover(e.enemyResources.Zone(), e.enemyResources.IsHovered(), ui.Borders["round"], ui.Colors["dark-brown"], ui.Colors["brown"]),
 		e.enemyLanes.View(),
 		e.playerLanes.View(),
-		e.playerResourceZone.View(),
+		renderZoneWithHover(e.playerResources.Zone(), e.playerResources.IsHovered(), ui.Borders["round"], ui.Colors["dark-brown"], ui.Colors["brown"]),
 	), 0, 0)
 
-	// Draw deck count with better formatting
-	deckCountStr := "Empty"
-	if len(e.deck) > 0 {
-		if len(e.deck) < 10 {
-			deckCountStr = "Deck: " + string(rune('0'+len(e.deck)))
-		} else {
-			deckCountStr = "Deck: " + string(rune('0'+len(e.deck)/10)) + string(rune('0'+len(e.deck)%10))
-		}
-	}
-	deckCount := ui.Text(deckCountStr)
-	screen = screen.Overlay(deckCount.View(), e.W-12, 5)
-
-	for _, card := range e.enemyResources {
-		if card != nil {
-			c := card.(*Card)
-			if !c.dragging {
-				screen = screen.Overlay(c.View(), c.X, c.Y)
-			}
-		}
-	}
-
-	for _, card := range e.enemyLanes.(*Lanes).cards {
-		if card != nil {
-			c := card.(*Card)
-			if !c.dragging {
-				screen = screen.Overlay(c.View(), c.X, c.Y)
-			}
-		}
-	}
-
-	// Draw cards in player lanes at their absolute positions
-	for _, card := range e.playerLanes.(*Lanes).cards {
-		if card != nil {
-			c := card.(*Card)
-			// Skip if card is being dragged (will be drawn on top later)
-			if !c.dragging {
-				screen = screen.Overlay(c.View(), c.X, c.Y)
-			}
-		}
-	}
-	// Draw player resource cards
-	for _, card := range e.playerResources {
-		if card != nil {
-			c := card.(*Card)
-			if !c.dragging {
-				screen = screen.Overlay(c.View(), c.X, c.Y)
-			}
-		}
-	}
-
-	// Draw cards in hand - non-hovered first, then hovered/dragged on top
-	var topCard *Card
-	for _, c := range e.hand {
-		if c.(*Card).hovered || c.(*Card).dragging {
-			topCard = c.(*Card)
-		} else {
-			screen = screen.Overlay(c.View(), c.(*Card).X, c.(*Card).GetDrawY())
-		}
-	}
-	// Draw hovered/dragged card on top (from hand or lanes)
-	if topCard != nil {
-		screen = screen.Overlay(topCard.View(), topCard.X, topCard.GetDrawY())
-	}
-
-	// Also draw any dragged cards from lanes on top
-	if lanes, ok := e.playerLanes.(*Lanes); ok {
-		for _, card := range lanes.cards {
-			if card != nil {
-				c := card.(*Card)
-				if c.dragging {
-					screen = screen.Overlay(c.View(), c.X, c.Y)
-				}
-			}
-		}
-	}
-	if lanes, ok := e.enemyLanes.(*Lanes); ok {
-		for _, card := range lanes.cards {
-			if card != nil {
-				c := card.(*Card)
-				if c.dragging {
-					screen = screen.Overlay(c.View(), c.X, c.Y)
-				}
-			}
-		}
-	}
-
-	// Also draw any dragged resource cards on top
-	for _, card := range e.playerResources {
-		if card != nil {
-			c := card.(*Card)
-			if c.dragging {
-				screen = screen.Overlay(c.View(), c.X, c.Y)
-			}
-		}
-	}
-	for _, card := range e.enemyResources {
-		if card != nil {
-			c := card.(*Card)
-			if c.dragging {
-				screen = screen.Overlay(c.View(), c.X, c.Y)
-			}
-		}
-	}
-
-	// Draw button on top so it's always clickable
-	if e.drawButton != nil {
-		buttonView := e.drawButton.View()
-		screen = screen.Overlay(buttonView, e.W-12, 15)
-
-		// Draw hint text
-		if len(e.deck) == 0 {
-			hint := ui.Text("No cards left")
-			screen = screen.Overlay(hint.View(), e.W-13, 18)
-		}
-	}
+	// Render UI components
+	screen = e.renderDeckCount(screen)
+	screen = e.renderLifeTotals(screen)
+	screen = e.renderCards(screen)
+	screen = e.renderStack(screen)
+	screen = e.renderPhaseLabel(screen)
+	screen = e.renderAbilityMenu(screen)
+	screen = e.renderSkipButton(screen)
 
 	return screen
 }

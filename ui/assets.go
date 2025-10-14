@@ -45,6 +45,8 @@ var (
 	faintMap []int
 	// brightMap stores the index of the bright color for each color
 	brightMap []int
+
+	desatMap []int
 	// borderMap stores the index of the border for each border
 	Borders map[string]Border
 	Colors map[string]ColorIndex
@@ -84,7 +86,12 @@ func init() {
 			log.Fatal("Unable to parse bright color index on line ", i, err)
 		}
 		brightMap = append(brightMap, bc)
-		Colors[record[4]] = ColorIndex(i-1)
+		dc, err := strconv.Atoi(record[4])
+		if err != nil {
+			log.Fatal("Unable to parse desaturated color index on line ", i, err)
+		}
+		desatMap = append(desatMap, dc)
+		Colors[record[5]] = ColorIndex(i-1)
 	}
 
     records, err = csv.NewReader(bytes.NewReader(borderCSV)).ReadAll()

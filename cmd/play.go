@@ -32,7 +32,7 @@ to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// Window setup
 		ebiten.SetWindowSize(screenWidth, screenHeight)
-		ebiten.SetWindowTitle("Tiles (Ebitengine Demo)")
+		ebiten.SetWindowTitle("Card game")
 
 		// Start the game loop
 		prog := &ui.Program{

@@ -282,24 +282,24 @@ func newPlayer(
 ) *Player {
 	p := &Player{
 		life:    10,
-		Deck:    Pile{Cards: []*CardInstance{}},
-		Hand:    Pile{Cards: []*CardInstance{}},
-		Pile:    Pile{Cards: []*CardInstance{}},
-		Board:   Board{Slots: make([]*CardInstance, boardSize)},
+		deck:    Pile{Cards: []*CardInstance{}},
+		hand:    Pile{Cards: []*CardInstance{}},
+		pile:    Pile{Cards: []*CardInstance{}},
+		board:   Board{Slots: make([]*CardInstance, boardSize)},
 		essence: []string{},
 	}
 	for _, card := range deck {
-		p.Deck.Add(NewCardInstance(card, p, ZoneDeck))
+		p.deck.Add(NewCardInstance(card, p, ZoneDeck))
 	}
 	for _, card := range hand {
-		p.Hand.Add(NewCardInstance(card, p, ZoneHand))
+		p.hand.Add(NewCardInstance(card, p, ZoneHand))
 	}
 	for _, card := range pile {
-		p.Hand.Add(NewCardInstance(card, p, ZoneHand))
+		p.hand.Add(NewCardInstance(card, p, ZoneHand))
 	}
 	for i, card := range board {
 		if card != nil {
-			p.Board.Insert(NewCardInstance(card, p, ZoneBoard), i)
+			p.board.Insert(NewCardInstance(card, p, ZoneBoard), i)
 		}
 	}
 	return p
@@ -333,18 +333,18 @@ func TestGamePhases(t *testing.T) {
 			if i != 2 {
 				t.Fatalf("Phase draw is not second phase: %v", phase)
 			}
-			if len(p1.Deck.Cards) != 1 {
+			if len(p1.deck.Cards) != 1 {
 				t.Fatalf("Deck size not 1")
-			} else if len(p1.Hand.Cards) != 1 {
+			} else if len(p1.hand.Cards) != 1 {
 				t.Fatalf("Hand does not contain card")
-			} else if p1.Hand.Cards[0].Card.Name != "card2" {
+			} else if p1.hand.Cards[0].Card.Name != "card2" {
 				t.Fatalf("Hand does not contain top card from deck")
 			}
 		case PhasePlay:
 			if i != 3 {
 				t.Fatalf("Phase play is not third phase: %v", phase)
 			}
-			a1 := p1.Hand.Cards[0].Cast(1)
+			a1 := p1.hand.Cards[0].Cast(1)
 			game.Play(a1)
 			if len(game.stack.cards) != 1 {
 				t.Fatalf("Stack size not 1")
@@ -357,7 +357,7 @@ func TestGamePhases(t *testing.T) {
 				t.Fatalf("Ability not the cast card")
 			}
 			a2.Resolve()
-			if p1.Board.Slots[1].Card.Name != "card2" {
+			if p1.board.Slots[1].Card.Name != "card2" {
 				t.Fatalf("Board does not contain card from hand")
 			}
 		case PhaseEnd:
@@ -414,7 +414,7 @@ func TestTrigger(t *testing.T) {
 	game.turn = &Turn{game, p1, nil, 0, 0}
 	game.turn.phase = &Phase{game.turn, p1, PhasePlay}
 
-	a1 := p1.Hand.Cards[0].Cast(1)
+	a1 := p1.hand.Cards[0].Cast(1)
 	game.Play(a1)
 
 	if len(game.stack.cards) != 1 {
@@ -429,7 +429,7 @@ func TestTrigger(t *testing.T) {
 		t.Fatalf("Stack size not 1")
 	}
 	game.stack.Pop().Resolve()
-	if len(p1.Hand.Cards) != 1 {
+	if len(p1.hand.Cards) != 1 {
 		t.Fatalf("Hand size not 1")
 	}
 }

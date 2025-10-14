@@ -45,7 +45,6 @@ const (
 	welcomeMessage = "%s joined the room"
 )
 
-//go:embed cards.txt
 var cardText []byte
 var cards = []*game.Card{}
 
@@ -61,15 +60,26 @@ type Bot struct {
 
 func (c *Bot) GetName() string { return c.Name }
 
-func (c *Bot) Prompt(action string, options []string, num int) ([]int, error) {
-	if len(options) == 0 || num == 0 {
-		return []int{game.SkipCode}, nil
-	}
-	opts := []int{}
-	for i := range options {
-		opts = append(opts, i)
-	}
-	return opts[:num], nil
+func (c *Bot) SendPrompt(cmd game.Cmd) <-chan game.InputResponse {
+	responseChan := make(chan game.InputResponse, 1)
+	
+	go func() {
+		if len(cmd.Args) == 0 || cmd.Num == 0 {
+			responseChan <- game.InputResponse{Selected: []int{game.SkipCode}, Err: nil}
+			return
+		}
+		opts := []int{}
+		for i := range cmd.Args {
+			opts = append(opts, i)
+		}
+		selected := opts
+		if cmd.Num < len(opts) {
+			selected = opts[:cmd.Num]
+		}
+		responseChan <- game.InputResponse{Selected: selected, Err: nil}
+	}()
+	
+	return responseChan
 }
 
 func init() {
@@ -272,14 +282,14 @@ func GetCardInfo(c *game.CardInstance) CardInfo {
 type GameInfo struct {
 	Players map[string]string `json:"players,omitempty"`
 	Cards   []CardInfo        `json:"cards,omitempty"`
-	Seen    map[string]string `json:"seen,omitempty"`
+	Seen    map[int]string `json:"seen,omitempty"`
 }
 
 type GameEvent struct {
 	Event      string `json:"event"`
-	Subject    string `json:"subject,omitempty"`
-	Source     string `json:"source,omitempty"`
-	Controller string `json:"controller,omitempty"`
+	Subject    int `json:"subject,omitempty"`
+	Source     int `json:"source,omitempty"`
+	Controller int `json:"controller,omitempty"`
 	Args       []any  `json:"args,omitempty"`
 }
 
@@ -291,30 +301,78 @@ type GameRequest struct {
 
 func (room *Room) eventHandler(event *game.Event) {
 	card, isCard := event.Subject.(*game.CardInstance)
+	
+	// Handle card reveal events
 	if event.Event == game.EventOnDraw || event.Event == game.EventOnEnterBoard {
 		for _, client := range room.clients {
 			if client.player == card.Owner || event.Event == game.EventOnEnterBoard {
-
 				client.sendInfo(&GameInfo{
-					Seen:  map[string]string{card.GetId().String(): card.Card.Name},
+					Seen:  map[int]string{card.GetId(): card.Card.Name},
 					Cards: []CardInfo{GetCardInfo(card)},
 				})
 			}
 		}
 	}
 
+	// Handle prompt events - these are sent to all clients for UI state tracking
+	// The actual prompt is handled by the CommandI implementation
+	if room.isPromptEvent(event.Event) {
+		room.broadcastPromptEvent(event)
+		return
+	}
+
+	// Broadcast standard game events
 	e := GameEvent{Event: event.Event.String(), Args: event.Args}
 	if event.Subject != nil {
-		e.Subject = event.Subject.GetId().String()
+		e.Subject = event.Subject.GetId()
 	}
 	if event.Source != nil {
-		e.Source = event.Source.Source.ID.String()
-		e.Controller = event.Source.Controller.GetId().String()
+		e.Source = event.Source.Source.GetId()
+		e.Controller = event.Source.Controller.GetId()
 	} else if isCard {
-		e.Controller = card.Controller.GetId().String()
+		e.Controller = card.Controller.GetId()
 	} else {
-		e.Controller = event.Subject.GetId().String()
+		e.Controller = event.Subject.GetId()
 	}
+	m := Message{Type: GameEventAction, Data: &e}
+	room.broadcastToClientsInRoom(m.encode())
+}
+
+// isPromptEvent checks if the event is a prompt-related event
+func (room *Room) isPromptEvent(eventType game.EventType) bool {
+	return eventType == game.EventPromptCard ||
+		eventType == game.EventPromptField ||
+		eventType == game.EventPromptAbility ||
+		eventType == game.EventPromptTarget ||
+		eventType == game.EventPromptSource ||
+		eventType == game.EventPromptDiscard
+}
+
+// broadcastPromptEvent broadcasts prompt events to all clients for UI state tracking
+func (room *Room) broadcastPromptEvent(event *game.Event) {
+	// Extract the player making the choice
+	player, ok := event.Subject.(*game.Player)
+	if !ok {
+		return
+	}
+	
+	// Extract the command from Args
+	var cmd game.Cmd
+	if len(event.Args) > 0 {
+		cmd, ok = event.Args[0].(game.Cmd)
+		if !ok {
+			return
+		}
+	}
+	
+	// Create game event with prompt information
+	e := GameEvent{
+		Event:      event.Event.String(),
+		Subject:    player.GetId(),
+		Controller: player.GetId(),
+		Args:       cmd.Args,
+	}
+	
 	m := Message{Type: GameEventAction, Data: &e}
 	room.broadcastToClientsInRoom(m.encode())
 }
@@ -398,31 +456,48 @@ func (client *Client) sendInfo(info *GameInfo) {
 	client.send <- m.encode()
 }
 
-func (c *Client) Prompt(action string, choices []string, num int) ([]int, error) {
-	m := Message{
-		Type: GamePromptAction,
-		Data: &GameRequest{action, choices, num},
-	}
-	c.send <- m.encode()
-	choice := <-c.receive
-	if choice == nil {
-		return []int{game.SkipCode}, nil
-	}
-	selectedIds, ok := choice.([]any)
-	if !ok {
-		return nil, fmt.Errorf("invalid choice type")
-	}
-	// TODO: handle timeout or other errors
-	selected := []int{}
-	for _, c := range selectedIds {
-		for i, o := range choices {
-			if c == o {
-				selected = append(selected, i)
-				break
+func (c *Client) SendPrompt(cmd game.Cmd) <-chan game.InputResponse {
+	responseChan := make(chan game.InputResponse, 1)
+	
+	go func() {
+		// Convert cmd.Args to string slice
+		choices := make([]string, len(cmd.Args))
+		for i, arg := range cmd.Args {
+			choices[i] = fmt.Sprintf("%v", arg)
+		}
+		
+		m := Message{
+			Type: GamePromptAction,
+			Data: &GameRequest{cmd.Type, choices, cmd.Num},
+		}
+		c.send <- m.encode()
+		
+		choice := <-c.receive
+		if choice == nil {
+			responseChan <- game.InputResponse{Selected: []int{game.SkipCode}, Err: nil}
+			return
+		}
+		
+		selectedIds, ok := choice.([]any)
+		if !ok {
+			responseChan <- game.InputResponse{Selected: nil, Err: fmt.Errorf("invalid choice type")}
+			return
+		}
+		
+		// TODO: handle timeout or other errors
+		selected := []int{}
+		for _, c := range selectedIds {
+			for i, o := range choices {
+				if c == o {
+					selected = append(selected, i)
+					break
+				}
 			}
 		}
-	}
-	return selected, nil
+		responseChan <- game.InputResponse{Selected: selected, Err: nil}
+	}()
+	
+	return responseChan
 }
 
 func (client *Client) readPump() {

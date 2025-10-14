@@ -53,6 +53,20 @@ func (t Tiles) Bright() {
 	}
 }
 
+func (t Tiles) Darken() {
+	for i := range t {
+		t[i].Color = ColorIndex(faintMap[t[i].Color])
+		t[i].Background = ColorIndex(faintMap[t[i].Background])
+	}
+}
+
+func (t Tiles) Desaturate() {
+	for i := range t {
+		t[i].Color = ColorIndex(desatMap[t[i].Color])
+		t[i].Background = ColorIndex(desatMap[t[i].Background])
+	}
+}
+
 func (t Tiles) StringLength() int {
 	len := len(t)
 	for i := range len {
