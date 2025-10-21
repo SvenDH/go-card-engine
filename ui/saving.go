@@ -7,7 +7,7 @@ import (
 	"strconv"
 )
 
-func (e *TileMap) Save(path string) error {
+func (e *Image) Save(path string) error {
 	file, err := os.Create(path)
 	if err != nil {
 		return err
@@ -33,7 +33,7 @@ func (e *TileMap) Save(path string) error {
 	return nil
 }
 
-func LoadTileMap(path string) (*TileMap, error) {
+func LoadTileMap(path string) (*Image, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -69,5 +69,5 @@ func LoadTileMap(path string) (*TileMap, error) {
 		}
 	}
 
-	return &TileMap{W: width, H: height, Tiles: tiles}, nil
+	return &Image{W: width, H: height, Tiles: tiles}, nil
 }

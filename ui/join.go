@@ -20,9 +20,9 @@ const (
 	Right  Position = 1.0
 )
 
-func JoinHorizontal(pos Position, tms ...*TileMap) *TileMap {
+func JoinHorizontal(pos Position, tms ...*Image) *Image {
 	if len(tms) == 0 {
-		return &TileMap{}
+		return &Image{}
 	}
 	if len(tms) == 1 {
 		return tms[0]
@@ -78,17 +78,17 @@ func JoinHorizontal(pos Position, tms ...*TileMap) *TileMap {
 			tiles = append(tiles, block[i]...)
 		}
 	}
-	return &TileMap{
-		W: xOffset,
-		H: maxHeight,
+	return &Image{
+		W:     xOffset,
+		H:     maxHeight,
 		Tiles: tiles,
 		Zones: zones,
 	}
 }
 
-func JoinVertical(pos Position, tms ...*TileMap) *TileMap {
+func JoinVertical(pos Position, tms ...*Image) *Image {
 	if len(tms) == 0 {
-		return &TileMap{}
+		return &Image{}
 	}
 	if len(tms) == 1 {
 		return tms[0]
@@ -155,9 +155,9 @@ func JoinVertical(pos Position, tms ...*TileMap) *TileMap {
 		}
 		yOffset += tms[i].H
 	}
-	return &TileMap{
-		W: maxWidth,
-		H: yOffset,
+	return &Image{
+		W:     maxWidth,
+		H:     yOffset,
 		Tiles: tiles,
 		Zones: zones,
 	}

@@ -105,7 +105,7 @@ type Style struct {
 	maxHeight int
 	tabWidth  int
 
-	transform func(*TileMap) *TileMap
+	transform func(*Image) *Image
 }
 
 func NewStyle() Style {
@@ -607,7 +607,7 @@ func (s Style) Transform(fn func(string) string) Style {
 }
 
 // Render applies the defined style formatting to a given string.
-func (s Style) Render(tm *TileMap) *TileMap {
+func (s Style) Render(tm *Image) *Image {
 	var (
 		width           = s.getAsInt(widthKey)
 		height          = s.getAsInt(heightKey)
@@ -633,7 +633,7 @@ func (s Style) Render(tm *TileMap) *TileMap {
 	}
 	// Strip newlines in single line mode
 	if inline {
-		tm = &TileMap{W: tm.W * tm.H, H: 1, Tiles: tm.Tiles}
+		tm = &Image{W: tm.W * tm.H, H: 1, Tiles: tm.Tiles}
 	}
 
 	// Word wrap
@@ -687,21 +687,21 @@ func (s Style) Render(tm *TileMap) *TileMap {
 		for _, l := range tm.getRows() {
 			tiles = append(tiles, l[:maxWidth]...)
 		}
-		tm = &TileMap{W: maxWidth, H: tm.H, Tiles: tiles, Zones: tm.Zones}
+		tm = &Image{W: maxWidth, H: tm.H, Tiles: tiles, Zones: tm.Zones}
 	}
 
 	// Truncate according to MaxHeight
 	if maxHeight > 0 {
 		height := min(maxHeight, tm.H)
 		if tm.H > 0 {
-			tm = &TileMap{W: tm.W, H: height, Tiles: tm.Tiles[:height*tm.W], Zones: tm.Zones}
+			tm = &Image{W: tm.W, H: height, Tiles: tm.Tiles[:height*tm.W], Zones: tm.Zones}
 		}
 	}
 
 	return tm
 }
 
-func alignTextHorizontal(tm *TileMap, pos Position, width int, style *Style) *TileMap {
+func alignTextHorizontal(tm *Image, pos Position, width int, style *Style) *Image {
 	var tiles Tiles
 	for _, l := range tm.getRows() {
 		lineWidth := l.StringLength()
@@ -741,7 +741,7 @@ func alignTextHorizontal(tm *TileMap, pos Position, width int, style *Style) *Ti
 		tiles = append(tiles, l...)
 	}
 
-	return &TileMap{
+	return &Image{
 		W:     max(tm.W, width),
 		H:     tm.H,
 		Tiles: tiles,
@@ -749,7 +749,7 @@ func alignTextHorizontal(tm *TileMap, pos Position, width int, style *Style) *Ti
 	}
 }
 
-func alignTextVertical(tm *TileMap, pos Position, height int, s Style) *TileMap {
+func alignTextVertical(tm *Image, pos Position, height int, s Style) *Image {
 	strHeight := tm.H
 	if height < strHeight {
 		return tm
@@ -771,7 +771,7 @@ func alignTextVertical(tm *TileMap, pos Position, height int, s Style) *TileMap 
 	return tm
 }
 
-func (s Style) applyMargins(tm *TileMap, inline bool) *TileMap {
+func (s Style) applyMargins(tm *Image, inline bool) *Image {
 	var (
 		topMargin    = s.getAsInt(marginTopKey)
 		rightMargin  = s.getAsInt(marginRightKey)
@@ -880,7 +880,7 @@ func (s Style) getAsPosition(k propKey) Position {
 	return Position(0)
 }
 
-func (s Style) getAsTransform(propKey) func(*TileMap) *TileMap {
+func (s Style) getAsTransform(propKey) func(*Image) *Image {
 	if !s.isSet(transformKey) {
 		return nil
 	}
@@ -950,7 +950,7 @@ func (s *Style) set(key propKey, value interface{}) {
 		// that negative value can be no less than -1).
 		s.tabWidth = value.(int)
 	case transformKey:
-		s.transform = value.(func(*TileMap) *TileMap)
+		s.transform = value.(func(*Image) *Image)
 	default:
 		if v, ok := value.(bool); ok { //nolint:nestif
 			if v {

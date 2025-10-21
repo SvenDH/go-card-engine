@@ -1,26 +1,25 @@
 /*
 Copyright © 2025 NAME HERE <EMAIL ADDRESS>
-
 */
 package cmd
 
 import (
 	"log"
 
-	"github.com/spf13/cobra"
 	"github.com/hajimehoshi/ebiten/v2"
-	
+	"github.com/spf13/cobra"
+
 	"github.com/SvenDH/go-card-engine/ui"
 )
 
 // TileMapViewer is a simple model that displays a tilemap
 type TileMapViewer struct {
-	tilemap *ui.TileMap
+	tilemap *ui.Image
 	width   int
 	height  int
 }
 
-func NewTileMapViewer(tilemap *ui.TileMap, width, height int) *TileMapViewer {
+func NewTileMapViewer(tilemap *ui.Image, width, height int) *TileMapViewer {
 	return &TileMapViewer{
 		tilemap: tilemap,
 		width:   width,
@@ -41,7 +40,7 @@ func (v *TileMapViewer) Update(msg ui.Msg) (ui.Model, ui.Cmd) {
 	return v, nil
 }
 
-func (v *TileMapViewer) View() *ui.TileMap {
+func (v *TileMapViewer) View() *ui.Image {
 	return v.tilemap
 }
 

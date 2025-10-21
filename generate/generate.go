@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"sync"
 
-    "github.com/anthonynsimon/bild/transform"
+	"github.com/anthonynsimon/bild/transform"
 
 	"github.com/SvenDH/go-card-engine/ui"
 )
@@ -14,18 +14,18 @@ import (
 // ImageToTileMap converts a source image into a TileMap that approximates it as closely as possible
 // using the available tiles in tilesSource and the palette colors. The provided rect defines where
 // the tilemap will be placed and its size; only full tiles inside the rect are considered.
-func ImageToTileMap(src image.Image, w, h int) *ui.TileMap {
+func ImageToTileMap(src image.Image, w, h int) *ui.Image {
 	if src == nil || ui.TilesSource == nil || len(ui.PaletteRGBA) == 0 {
-		return ui.NewTileMap(w, h, nil)
+		return ui.NewImage(w, h, nil)
 	}
 
 	// Determine grid size (only full tiles)
 	n := w * h
 	if n <= 0 {
-		return ui.NewTileMap(w, h, nil)
+		return ui.NewImage(w, h, nil)
 	}
 
-	tm := ui.NewTileMap(w, h, nil)
+	tm := ui.NewImage(w, h, nil)
 
 	// Tileset layout
 	tw := ui.TilesSource.Bounds().Dx() / ui.TileSize
@@ -36,7 +36,7 @@ func ImageToTileMap(src image.Image, w, h int) *ui.TileMap {
 	}
 	bgTileIndex := tileCount - 1 // convention: last tile is solid background tile
 
-    src = transform.Resize(src, w * ui.TileSize, h * ui.TileSize, transform.Lanczos)
+	src = transform.Resize(src, w*ui.TileSize, h*ui.TileSize, transform.Lanczos)
 
 	// Pre-extract all tiles' pixels from tilesSource into memory
 	tilesPix := make([][]color.NRGBA, tileCount)

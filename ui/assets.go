@@ -33,6 +33,9 @@ var tilesetChar []byte
 //go:embed assets/borders.csv
 var borderCSV []byte
 
+//go:embed assets/icons.csv
+var tilesCSV []byte
+
 var (
 	TilesImage  *ebiten.Image
 
@@ -42,14 +45,15 @@ var (
 	// tilesSource retains the original decoded tileset image for CPU-side pixel analysis
 	TilesSource image.Image
 	// faintMap stores the index of the faint color for each color
-	faintMap []int
+	FaintMap []int
 	// brightMap stores the index of the bright color for each color
-	brightMap []int
+	BrightMap []int
 
 	desatMap []int
 	// borderMap stores the index of the border for each border
 	Borders map[string]Border
 	Colors map[string]ColorIndex
+	TileIndices map[string]int
 
 	runeCharMap map[rune]int
 	reverseRunesMap map[int]rune
@@ -80,12 +84,12 @@ func init() {
 		if err != nil {
 			log.Fatal("Unable to parse faint color index on line ", i, err)
 		}
-		faintMap = append(faintMap, fc)
+		FaintMap = append(FaintMap, fc)
 		bc, err := strconv.Atoi(record[3])
 		if err != nil {
 			log.Fatal("Unable to parse bright color index on line ", i, err)
 		}
-		brightMap = append(brightMap, bc)
+		BrightMap = append(BrightMap, bc)
 		dc, err := strconv.Atoi(record[4])
 		if err != nil {
 			log.Fatal("Unable to parse desaturated color index on line ", i, err)
@@ -130,6 +134,28 @@ func init() {
 				i++
 			}
 		}
+	}
+
+	records, err = csv.NewReader(bytes.NewReader(tilesCSV)).ReadAll()
+	if err != nil {
+		log.Fatal("Unable to parse tiles file as CSV", err)
+	}
+	TileIndices = make(map[string]int, len(records)-1)
+	for i, record := range records {
+		if i < 1 {
+			continue
+		}
+		// CSV format: id,name,x,y
+		x, err := strconv.Atoi(record[2])
+		if err != nil {
+			log.Fatal("Unable to parse tile x on line ", i, err)
+		}
+		y, err := strconv.Atoi(record[3])
+		if err != nil {
+			log.Fatal("Unable to parse tile y on line ", i, err)
+		}
+		tileName := record[1]
+		TileIndices[tileName] = x + y * (TilesImage.Bounds().Dx() / TileSize)
 	}
 }
 

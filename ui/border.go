@@ -1,6 +1,5 @@
 package ui
 
-
 type Border struct {
 	Top          []int
 	Bottom       []int
@@ -25,7 +24,7 @@ func (b Border) isEmpty() bool {
 		b.MiddleTop == nil && b.MiddleBottom == nil
 }
 
-func (s Style) applyBorder(tm *TileMap) *TileMap {
+func (s Style) applyBorder(tm *Image) *Image {
 	var (
 		border    = s.getBorderStyle()
 		hasTop    = s.getAsBool(borderTopKey, false)
@@ -157,7 +156,7 @@ func (s Style) applyBorder(tm *TileMap) *TileMap {
 		newZones[i] = z.Add(xOffset, yOffset)
 	}
 
-	return &TileMap{
+	return &Image{
 		W:     len(out) / height,
 		H:     height,
 		Tiles: out,

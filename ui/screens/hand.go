@@ -20,7 +20,7 @@ func NewHand(game *CardGame, width, height int) *Hand {
 	}
 
 	h.zone = &ui.Zone{
-		M:         ui.NewTileMap(width-15, 10, nil), // Taller to cover raised cards
+		M:         ui.NewImage(width-15, 10, nil), // Taller to cover raised cards
 		W:         width - 15,
 		H:         10,
 		Droppable: true,
@@ -59,15 +59,15 @@ func NewHand(game *CardGame, width, height int) *Hand {
 	return h
 }
 
-// AddCard adds a card to the hand
-func (h *Hand) AddCard(card *Card) {
+// Add adds a card to the hand
+func (h *Hand) Add(card *Card) {
 	card.Location = CardLocHand
 	h.cards = append(h.cards, card)
 	h.Layout()
 }
 
-// RemoveCard removes a card from the hand
-func (h *Hand) RemoveCard(card *Card) bool {
+// Remove removes a card from the hand
+func (h *Hand) Remove(card *Card) bool {
 	for i, c := range h.cards {
 		if c.(*Card) == card {
 			h.cards = append(h.cards[:i], h.cards[i+1:]...)
@@ -153,7 +153,7 @@ func (h *Hand) Update(msg ui.Msg) (ui.Model, ui.Cmd) {
 }
 
 // View returns the hand zone view
-func (h *Hand) View() *ui.TileMap {
+func (h *Hand) View() *ui.Image {
 	return h.zone.View()
 }
 

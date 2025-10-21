@@ -4,17 +4,17 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/SvenDH/go-card-engine/game"
+	"github.com/SvenDH/go-card-engine/engine"
 )
 
 // enemyBotPromptCard handles the bot's card selection logic
-func (e *CardGame) enemyBotPromptCard(choices []any, player *game.Player) {
+func (e *CardGame) enemyBotPromptCard(choices []any, player *engine.Player) {
 	// Add a small delay to make the bot feel more natural
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 
 		if len(choices) == 0 {
-			e.enemy.Send(game.Msg{Selected: []int{game.SkipCode}})
+			e.enemy.Send(engine.Msg{Selected: []int{engine.SkipCode}})
 			return
 		}
 
@@ -23,7 +23,7 @@ func (e *CardGame) enemyBotPromptCard(choices []any, player *game.Player) {
 			// Select a random card from available choices
 			selected := rand.Intn(len(choices))
 			// Track the enemy's selected card
-			if cardInst, ok := choices[selected].(*game.CardInstance); ok {
+			if cardInst, ok := choices[selected].(*engine.CardInstance); ok {
 				if card, exists := e.cardMap[cardInst.GetId()]; exists {
 					e.enemySelectedCard = card
 				} else {
@@ -31,10 +31,10 @@ func (e *CardGame) enemyBotPromptCard(choices []any, player *game.Player) {
 					e.enemySelectedCard = e.CreateCard(cardInst)
 				}
 			}
-			e.enemy.Send(game.Msg{Selected: []int{selected}})
+			e.enemy.Send(engine.Msg{Selected: []int{selected}})
 		} else {
 			e.enemySelectedCard = nil
-			e.enemy.Send(game.Msg{Selected: []int{game.SkipCode}})
+			e.enemy.Send(engine.Msg{Selected: []int{engine.SkipCode}})
 		}
 	}()
 }
@@ -45,13 +45,13 @@ func (e *CardGame) enemyBotPromptField(choices []any) {
 		time.Sleep(200 * time.Millisecond)
 
 		if len(choices) == 0 {
-			e.enemy.Send(game.Msg{Selected: []int{game.SkipCode}})
+			e.enemy.Send(engine.Msg{Selected: []int{engine.SkipCode}})
 			return
 		}
 
 		// Select a random field from available choices
 		selected := rand.Intn(len(choices))
-		e.enemy.Send(game.Msg{Selected: []int{selected}})
+		e.enemy.Send(engine.Msg{Selected: []int{selected}})
 	}()
 }
 
@@ -61,12 +61,12 @@ func (e *CardGame) enemyBotPromptAbility(choices []any) {
 		time.Sleep(250 * time.Millisecond)
 
 		if len(choices) == 0 {
-			e.enemy.Send(game.Msg{Selected: []int{game.SkipCode}})
+			e.enemy.Send(engine.Msg{Selected: []int{engine.SkipCode}})
 			return
 		}
 
 		// Always activate first available ability
-		e.enemy.Send(game.Msg{Selected: []int{0}})
+		e.enemy.Send(engine.Msg{Selected: []int{0}})
 	}()
 }
 
@@ -76,13 +76,13 @@ func (e *CardGame) enemyBotPromptTarget(choices []any) {
 		time.Sleep(200 * time.Millisecond)
 
 		if len(choices) == 0 {
-			e.enemy.Send(game.Msg{Selected: []int{game.SkipCode}})
+			e.enemy.Send(engine.Msg{Selected: []int{engine.SkipCode}})
 			return
 		}
 
 		// Select a random target
 		selected := rand.Intn(len(choices))
-		e.enemy.Send(game.Msg{Selected: []int{selected}})
+		e.enemy.Send(engine.Msg{Selected: []int{selected}})
 	}()
 }
 
@@ -93,9 +93,9 @@ func (e *CardGame) enemyBotPromptSource(choices []any) {
 
 		// 80% chance to play as source (option 1), 20% as spell (option 0)
 		if rand.Float32() < 0.8 {
-			e.enemy.Send(game.Msg{Selected: []int{1}})
+			e.enemy.Send(engine.Msg{Selected: []int{1}})
 		} else {
-			e.enemy.Send(game.Msg{Selected: []int{0}})
+			e.enemy.Send(engine.Msg{Selected: []int{0}})
 		}
 	}()
 }
@@ -106,12 +106,12 @@ func (e *CardGame) enemyBotPromptDiscard(choices []any) {
 		time.Sleep(200 * time.Millisecond)
 
 		if len(choices) == 0 {
-			e.enemy.Send(game.Msg{Selected: []int{game.SkipCode}})
+			e.enemy.Send(engine.Msg{Selected: []int{engine.SkipCode}})
 			return
 		}
 
 		// Discard a random card
 		selected := rand.Intn(len(choices))
-		e.enemy.Send(game.Msg{Selected: []int{selected}})
+		e.enemy.Send(engine.Msg{Selected: []int{selected}})
 	}()
 }

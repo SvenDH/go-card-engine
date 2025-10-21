@@ -14,23 +14,23 @@ import (
 
 // CLIPModel provides text and vision encoding using CLIP
 type CLIPModel struct {
-	textSession    *ort.AdvancedSession
-	visionSession  *ort.AdvancedSession
-	tokenizer      *CLIPTokenizer
-	textInput      *ort.Tensor[int64]
-	textOutput     *ort.Tensor[float32]
-	visionInput    *ort.Tensor[float32]
-	visionOutput   *ort.Tensor[float32]
-	embeddingDim   int
+	textSession   *ort.AdvancedSession
+	visionSession *ort.AdvancedSession
+	tokenizer     *CLIPTokenizer
+	textInput     *ort.Tensor[int64]
+	textOutput    *ort.Tensor[float32]
+	visionInput   *ort.Tensor[float32]
+	visionOutput  *ort.Tensor[float32]
+	embeddingDim  int
 }
 
 // CLIPTokenizer handles CLIP text tokenization
 type CLIPTokenizer struct {
-	vocab          map[string]int
-	merges         [][]string
-	startToken     int
-	endToken       int
-	maxLength      int
+	vocab      map[string]int
+	merges     [][]string
+	startToken int
+	endToken   int
+	maxLength  int
 }
 
 // NewCLIPModel creates a new CLIP model from ONNX files
@@ -149,7 +149,7 @@ func (c *CLIPModel) Close() error {
 func (c *CLIPModel) EncodeText(text string) ([]float32, error) {
 	// Tokenize text
 	tokens := c.tokenizer.Encode(text)
-	
+
 	// Copy tokens to input tensor
 	inputData := c.textInput.GetData()
 	for i := range inputData {
@@ -179,7 +179,7 @@ func (c *CLIPModel) EncodeText(text string) ([]float32, error) {
 func (c *CLIPModel) EncodeImage(img image.Image) ([]float32, error) {
 	// Preprocess image (resize to 224x224, normalize)
 	inputData := c.preprocessImage(img)
-	
+
 	// Copy to input tensor
 	copy(c.visionInput.GetData(), inputData)
 
@@ -268,14 +268,14 @@ func LoadCLIPTokenizer(path string) (*CLIPTokenizer, error) {
 func (t *CLIPTokenizer) Encode(text string) []int {
 	// Basic BPE tokenization (simplified)
 	text = strings.ToLower(strings.TrimSpace(text))
-	
+
 	tokens := make([]int, t.maxLength)
 	tokens[0] = t.startToken
-	
+
 	// Split into words and tokenize
 	words := strings.Fields(text)
 	tokenIdx := 1
-	
+
 	for _, word := range words {
 		// Try to find word in vocab
 		word = word + "</w>" // BPE end-of-word marker
@@ -293,12 +293,12 @@ func (t *CLIPTokenizer) Encode(text string) []int {
 			}
 		}
 	}
-	
+
 	// Add end token
 	if tokenIdx < t.maxLength {
 		tokens[tokenIdx] = t.endToken
 	}
-	
+
 	return tokens
 }
 
@@ -324,11 +324,11 @@ func CLIPSimilarity(a, b []float32) float32 {
 	if len(a) != len(b) {
 		return 0
 	}
-	
+
 	dot := float32(0)
 	for i := range a {
 		dot += a[i] * b[i]
 	}
-	
+
 	return dot // Already normalized, so dot product = cosine similarity
 }

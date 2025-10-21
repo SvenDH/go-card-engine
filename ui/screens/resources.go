@@ -21,7 +21,7 @@ func NewResourceZone(game *CardGame, width, height int, isPlayer bool) *Resource
 		isPlayer: isPlayer,
 	}
 
-	tm := ui.NewTileMap(width-15, 13, nil)
+	tm := ui.NewImage(width-15, 13, nil)
 
 	r.zone = &ui.Zone{
 		M:         tm,
@@ -87,8 +87,8 @@ func (r *ResourceZone) Layout() {
 	}
 
 	cardWidth := r.cards[0].(*Card).Picture.W + 2 // +2 for border
-	zoneWidth := r.zone.W - 4                      // Margins
-	spacing := 8                                   // Fixed spacing between resource cards
+	zoneWidth := r.zone.W - 4                     // Margins
+	spacing := 8                                  // Fixed spacing between resource cards
 
 	// Calculate total width needed
 	totalWidth := cardWidth + (len(r.cards)-1)*spacing
@@ -119,7 +119,7 @@ func (r *ResourceZone) Update(msg ui.Msg) (ui.Model, ui.Cmd) {
 }
 
 // View returns the resource zone view
-func (r *ResourceZone) View() *ui.TileMap {
+func (r *ResourceZone) View() *ui.Image {
 	return r.zone.View()
 }
 

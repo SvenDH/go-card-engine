@@ -26,7 +26,7 @@ const (
 
 type Msg interface{}
 
-type Tick struct{
+type Tick struct {
 	DeltaTime float32 // Delta time in seconds
 }
 
@@ -38,7 +38,8 @@ type MouseEvent struct {
 }
 
 type KeyEvent struct {
-	Key ebiten.Key
+	Key     ebiten.Key
+	Pressed bool // true for key press, false for key release
 }
 
 type Cmd func() Msg
@@ -88,7 +89,7 @@ func compactCmds[T ~[]Cmd](cmds []Cmd) Cmd {
 type Model interface {
 	Init() Cmd
 	Update(msg Msg) (Model, Cmd)
-	View() *TileMap
+	View() *Image
 }
 
 type Program struct {
@@ -129,15 +130,15 @@ func (p *Program) Update() error {
 			topZoneIndex = i
 		}
 	}
-	
+
 	// Second pass: update all zones, but only allow hover for topmost
 	for i := range p.zones {
 		inBounds := p.zones[i].InBounds(tmx, tmy)
 		hovered := p.zones[i].hovered
-		
+
 		// Only allow hover if this is the topmost capturing zone, or no capturing zone claimed it
 		shouldHover := inBounds && (topZoneIndex == -1 || i == topZoneIndex)
-		
+
 		if shouldHover {
 			p.zones[i].hovered = true
 			if !hovered && p.zones[i].Owner != nil {
@@ -207,7 +208,7 @@ func (p *Program) Update() error {
 			}
 		}
 	}
-	
+
 	// Handle drag capture - send drag-specific events to captured zone
 	if p.dragCapture != nil {
 		// Send drag motion events to captured zone
@@ -220,7 +221,7 @@ func (p *Program) Update() error {
 				Action: MouseDragMotion,
 			})
 		}
-		
+
 		// Check for button release to end capture
 		for j := range ebiten.MouseButtonMax {
 			if inpututil.IsMouseButtonJustReleased(ebiten.MouseButton(j)) {
@@ -233,7 +234,7 @@ func (p *Program) Update() error {
 					Action: MouseDragRelease,
 					Button: ebiten.MouseButton(j),
 				})
-				
+
 				// Send drop event to droppable zone under cursor (if any)
 				if p.lastDragHovered != nil {
 					p.runUpdate(p.lastDragHovered, MouseEvent{
@@ -246,7 +247,7 @@ func (p *Program) Update() error {
 						Zone:   p.draggedZone, // Pass dragged zone so drop target can access DragData
 					})
 				}
-				
+
 				// Release capture
 				p.dragCapture = nil
 				p.draggedZone = nil
@@ -257,7 +258,7 @@ func (p *Program) Update() error {
 				}
 			}
 		}
-		
+
 		// Update drag hover state for droppable zones
 		if p.draggedZone != nil {
 			var currentDragHovered *Zone
@@ -268,7 +269,7 @@ func (p *Program) Update() error {
 					break
 				}
 			}
-			
+
 			// Handle drag enter/leave for droppable zones
 			if currentDragHovered != p.lastDragHovered {
 				if p.lastDragHovered != nil {
@@ -305,20 +306,20 @@ func (p *Program) Update() error {
 	p.LastMouseY = my
 	for i := range ebiten.KeyMax {
 		if inpututil.IsKeyJustPressed(ebiten.Key(i)) {
-			p.runUpdate(p.M, KeyEvent{Key: ebiten.Key(i)})
+			p.runUpdate(p.M, KeyEvent{Key: ebiten.Key(i), Pressed: true})
 		}
 		if inpututil.IsKeyJustReleased(ebiten.Key(i)) {
-			p.runUpdate(p.M, KeyEvent{Key: ebiten.Key(i)})
+			p.runUpdate(p.M, KeyEvent{Key: ebiten.Key(i), Pressed: false})
 		}
 	}
-	
+
 	// Calculate delta time
 	currentTime := float64(ebiten.ActualTPS())
 	if currentTime == 0 {
 		currentTime = 60 // Default to 60 TPS if not available
 	}
 	deltaTime := float32(1.0 / currentTime)
-	
+
 	p.runUpdate(p.M, Tick{DeltaTime: deltaTime})
 	return nil
 }
