@@ -258,9 +258,7 @@ func (e *CardGame) PromptCard(choices []any) {
 	// Only disable cards if there are actual card choices
 	if len(e.playableCards) > 0 {
 		// Disable all cards in hand first
-		for _, card := range e.hand.Cards() {
-			card.(*Card).Disabled = true
-		}
+		e.disableHandCards()
 		// Enable only the playable cards
 		for _, card := range e.playableCards {
 			card.Disabled = false
@@ -282,9 +280,7 @@ func (e *CardGame) PromptCard(choices []any) {
 		}
 	} else {
 		// No card choices - enable all cards and switch to field for ability activation
-		for _, card := range e.hand.Cards() {
-			card.(*Card).Disabled = false
-		}
+		e.enableHandCards()
 		// Switch to field mode for ability activation if we have choices (only if keyboard focus is active)
 		if len(choices) > 0 && e.focusMode != "" {
 			e.focusMode = "field"
@@ -300,9 +296,7 @@ func (e *CardGame) PromptField(choices []any) {
 	e.playableCards = nil
 	e.cardChoices = nil // Clear card choices when switching to field prompt
 	// Re-enable all cards when switching to field prompt
-	for _, card := range e.hand.Cards() {
-		card.(*Card).Disabled = false
-	}
+	e.enableHandCards()
 	// Clear previous valid fields
 	e.validFields = make(map[int]bool)
 	for _, choice := range choices {
@@ -329,9 +323,7 @@ func (e *CardGame) PromptAbility(choices []any) {
 	e.playableCards = nil
 	e.playableFields = nil
 	// Re-enable all cards when switching to ability prompt
-	for _, card := range e.hand.Cards() {
-		card.(*Card).Disabled = false
-	}
+	e.enableHandCards()
 	// Store choices and create menu zones
 	e.abilityChoices = choices
 	e.abilityMenu = make([]*ui.Zone, len(choices))
@@ -423,11 +415,7 @@ func (e *CardGame) PromptAbility(choices []any) {
 					// Clear attack target preview
 					e.attackTargetField = -1
 					e.attackTargetIsPreview = false
-					// Re-enable all cards
-					for _, card := range e.hand.Cards() {
-						card.(*Card).Disabled = false
-					}
-					// Send ability selection to player
+					e.enableHandCards()
 					e.player.Send(engine.Msg{Selected: []int{choiceIndex}})
 				}
 				return nil
@@ -461,6 +449,16 @@ func (e *CardGame) PromptTarget(choices []any) {
 			// This might be a field index or other integer value
 			// Add to targetable fields
 			e.targetableFields = append(e.targetableFields, v)
+		}
+	}
+
+	// Disable all cards on the board (similar to PromptCard)
+	if len(e.targetableCards) > 0 {
+		e.disableAllCards()
+
+		// Enable only the targetable cards
+		for _, targetCard := range e.targetableCards {
+			targetCard.Disabled = false
 		}
 	}
 
@@ -782,11 +780,8 @@ func (e *CardGame) eventHandler(event *engine.Event) {
 		if player == e.player {
 			e.prompting = true
 			e.promptingTarget = true
+			e.enableHandCards()
 			e.PromptTarget(event.Args[1:])
-			// Re-enable all cards when switching to target prompt
-			for _, card := range e.hand.Cards() {
-				card.(*Card).Disabled = false
-			}
 		} else {
 			e.enemyBotPromptTarget(event.Args[1:])
 		}
@@ -794,9 +789,7 @@ func (e *CardGame) eventHandler(event *engine.Event) {
 		if player == e.player {
 			e.prompting = true
 			// Re-enable all cards when switching to source prompt
-			for _, card := range e.hand.Cards() {
-				card.(*Card).Disabled = false
-			}
+			e.enableHandCards()
 		} else {
 			e.enemyBotPromptSource(event.Args[1:])
 		}
@@ -804,9 +797,7 @@ func (e *CardGame) eventHandler(event *engine.Event) {
 		if player == e.player {
 			e.prompting = true
 			// Re-enable all cards when switching to discard prompt
-			for _, card := range e.hand.Cards() {
-				card.(*Card).Disabled = false
-			}
+			e.enableHandCards()
 		} else {
 			e.enemyBotPromptDiscard(event.Args[1:])
 		}
@@ -821,6 +812,86 @@ func (e *CardGame) updateCurrentPlayer(player *engine.Player) {
 	} else {
 		e.currentPlayer = "Unknown"
 	}
+}
+
+// iterateAllCards calls the provided function for each card in hand and on the board
+func (e *CardGame) iterateAllCards(fn func(*Card)) {
+	// Hand cards
+	for _, card := range e.hand.Cards() {
+		fn(card.(*Card))
+	}
+	// Player lane cards
+	playerLanes := e.playerLanes.(*Lanes)
+	for _, card := range playerLanes.cards {
+		if card != nil {
+			fn(card.(*Card))
+		}
+	}
+	// Enemy lane cards
+	enemyLanes := e.enemyLanes.(*Lanes)
+	for _, card := range enemyLanes.cards {
+		if card != nil {
+			fn(card.(*Card))
+		}
+	}
+}
+
+// iterateHandCards calls the provided function for each card in hand
+func (e *CardGame) iterateHandCards(fn func(*Card)) {
+	for _, card := range e.hand.Cards() {
+		fn(card.(*Card))
+	}
+}
+
+// iterateLaneCards calls the provided function for each card on the board
+func (e *CardGame) iterateLaneCards(fn func(*Card)) {
+	playerLanes := e.playerLanes.(*Lanes)
+	for _, card := range playerLanes.cards {
+		if card != nil {
+			fn(card.(*Card))
+		}
+	}
+	enemyLanes := e.enemyLanes.(*Lanes)
+	for _, card := range enemyLanes.cards {
+		if card != nil {
+			fn(card.(*Card))
+		}
+	}
+}
+
+// disableAllCards disables all cards in hand and on the board
+func (e *CardGame) disableAllCards() {
+	e.iterateAllCards(func(c *Card) { c.Disabled = true })
+}
+
+// enableAllCards enables all cards in hand and on the board
+func (e *CardGame) enableAllCards() {
+	e.iterateAllCards(func(c *Card) { c.Disabled = false })
+}
+
+// disableHandCards disables all cards in hand
+func (e *CardGame) disableHandCards() {
+	e.iterateHandCards(func(c *Card) { c.Disabled = true })
+}
+
+// enableHandCards enables all cards in hand
+func (e *CardGame) enableHandCards() {
+	e.iterateHandCards(func(c *Card) { c.Disabled = false })
+}
+
+// disableLaneCards disables all cards on the board
+func (e *CardGame) disableLaneCards() {
+	e.iterateLaneCards(func(c *Card) { c.Disabled = true })
+}
+
+// enableLaneCards enables all cards on the board
+func (e *CardGame) enableLaneCards() {
+	e.iterateLaneCards(func(c *Card) { c.Disabled = false })
+}
+
+// clearAllFocus clears focus from all cards
+func (e *CardGame) clearAllFocus() {
+	e.iterateAllCards(func(c *Card) { c.Focused = false })
 }
 
 // TriggerScreenShake starts a screen shake animation
@@ -1373,6 +1444,8 @@ func (e *CardGame) handleEnterKey() ui.Cmd {
 								e.targetChoices = nil
 								e.targetableCards = nil
 								e.targetableFields = nil
+								// Re-enable all cards on board
+								e.enableLaneCards()
 								return nil
 							}
 						}
@@ -1390,6 +1463,8 @@ func (e *CardGame) handleEnterKey() ui.Cmd {
 							e.targetChoices = nil
 							e.targetableCards = nil
 							e.targetableFields = nil
+							// Re-enable all cards on board
+							e.enableLaneCards()
 							return nil
 						}
 					}
@@ -1563,32 +1638,17 @@ func (e *CardGame) handleSkipAction() ui.Cmd {
 	e.attackTargetIsPreview = false
 
 	// Re-enable all cards
-	for _, card := range e.hand.Cards() {
-		card.(*Card).Disabled = false
-	}
+	e.enableAllCards()
 
 	return nil
 }
 
 func (e *CardGame) updateFocusIndicators() {
 	// Clear all focus indicators first
-	for _, card := range e.hand.Cards() {
-		card.(*Card).Focused = false
-	}
+	e.clearAllFocus()
 
 	playerLanes := e.playerLanes.(*Lanes)
 	enemyLanes := e.enemyLanes.(*Lanes)
-
-	for _, card := range playerLanes.cards {
-		if card != nil {
-			card.(*Card).Focused = false
-		}
-	}
-	for _, card := range enemyLanes.cards {
-		if card != nil {
-			card.(*Card).Focused = false
-		}
-	}
 
 	// Set focus on the appropriate card/field
 	if e.focusMode == "hand" {

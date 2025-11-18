@@ -429,7 +429,7 @@ func renderCardForStack(c *Card) *ui.Image {
 			"o": "diamonds",
 			"w": "clubs",
 		}
-		
+
 		costParts := []*ui.Image{}
 		for _, cost := range c.cardInstance.Card.Costs {
 			if cost.Color != "" {

@@ -29,6 +29,104 @@ type ONNXEmbedder struct {
 	stdNorm      []float32
 }
 
+// NewSqueezeNetIntermediateEmbedder creates an embedder using early SqueezeNet layers
+// This extracts features from fire3 module for better spatial feature matching
+// Note: Layer names vary by model version. Use NewONNXEmbedder for reliable final layer output.
+func NewSqueezeNetIntermediateEmbedder(modelPath string, layerName string) (*ONNXEmbedder, error) {
+	// Initialize ONNX Runtime
+	ort.SetSharedLibraryPath("lib/libonnxruntime.so")
+	err := ort.InitializeEnvironment()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize ONNX Runtime: %w", err)
+	}
+
+	// Input shape: [1, 3, 224, 224]
+	inputShape := []int64{1, 3, 224, 224}
+	
+	// Output shape depends on layer
+	// fire3: [1, 128, 28, 28] - early features with spatial info
+	// fire4: [1, 256, 28, 28] - slightly deeper features
+	// fire5: [1, 256, 14, 14] - after pooling
+	var outputShape []int64
+	var embeddingDim int
+	
+	switch layerName {
+	case "squeezenet0_fire3_concat0":
+		outputShape = []int64{1, 128, 28, 28}
+		embeddingDim = 128 // After global pooling
+	case "squeezenet0_fire4_concat0":
+		outputShape = []int64{1, 256, 28, 28}
+		embeddingDim = 256
+	case "squeezenet0_fire5_concat0":
+		outputShape = []int64{1, 256, 14, 14}
+		embeddingDim = 256
+	default:
+		// Default to fire3
+		layerName = "squeezenet0_fire3_concat0"
+		outputShape = []int64{1, 128, 28, 28}
+		embeddingDim = 128
+	}
+
+	// Create input/output tensors
+	inputTensor, err := ort.NewEmptyTensor[float32](ort.NewShape(inputShape...))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create input tensor: %w", err)
+	}
+
+	outputTensor, err := ort.NewEmptyTensor[float32](ort.NewShape(outputShape...))
+	if err != nil {
+		inputTensor.Destroy()
+		return nil, fmt.Errorf("failed to create output tensor: %w", err)
+	}
+
+	// Create session options
+	sessionOptions, err := ort.NewSessionOptions()
+	if err != nil {
+		inputTensor.Destroy()
+		outputTensor.Destroy()
+		return nil, fmt.Errorf("failed to create session options: %w", err)
+	}
+	defer sessionOptions.Destroy()
+
+	// Set optimization level
+	err = sessionOptions.SetIntraOpNumThreads(4)
+	if err != nil {
+		inputTensor.Destroy()
+		outputTensor.Destroy()
+		return nil, fmt.Errorf("failed to set thread count: %w", err)
+	}
+
+	// Load the model with intermediate layer output
+	session, err := ort.NewAdvancedSession(modelPath,
+		[]string{"data"},
+		[]string{layerName}, // Output from intermediate layer
+		[]ort.Value{inputTensor},
+		[]ort.Value{outputTensor},
+		sessionOptions)
+	if err != nil {
+		inputTensor.Destroy()
+		outputTensor.Destroy()
+		return nil, fmt.Errorf("failed to create ONNX session: %w", err)
+	}
+
+	// ImageNet normalization
+	meanNorm := []float32{0.485, 0.456, 0.406}
+	stdNorm := []float32{0.229, 0.224, 0.225}
+
+	return &ONNXEmbedder{
+		session:      session,
+		inputTensor:  inputTensor,
+		outputTensor: outputTensor,
+		inputShape:   inputShape,
+		outputShape:  outputShape,
+		inputName:    "data",
+		outputName:   layerName,
+		embeddingDim: embeddingDim,
+		meanNorm:     meanNorm,
+		stdNorm:      stdNorm,
+	}, nil
+}
+
 // NewONNXEmbedder creates an embedder from an ONNX model file
 func NewONNXEmbedder(modelPath string) (*ONNXEmbedder, error) {
 	// Initialize ONNX Runtime
@@ -163,8 +261,30 @@ func (e *ONNXEmbedder) ComputeEmbedding(img image.Image) ([]float32, error) {
 
 	// Copy output data
 	outputData := e.outputTensor.GetData()
-	embedding := make([]float32, len(outputData))
-	copy(embedding, outputData)
+	
+	// If output is spatial (has more than 2 dimensions), apply global average pooling
+	var embedding []float32
+	if len(e.outputShape) == 4 {
+		// Spatial output: [batch, channels, height, width]
+		channels := int(e.outputShape[1])
+		height := int(e.outputShape[2])
+		width := int(e.outputShape[3])
+		spatialSize := height * width
+		
+		// Global average pooling over spatial dimensions
+		embedding = make([]float32, channels)
+		for c := 0; c < channels; c++ {
+			sum := float32(0)
+			for i := 0; i < spatialSize; i++ {
+				sum += outputData[c*spatialSize+i]
+			}
+			embedding[c] = sum / float32(spatialSize)
+		}
+	} else {
+		// Already a vector
+		embedding = make([]float32, len(outputData))
+		copy(embedding, outputData)
+	}
 
 	// Normalize embedding to unit length
 	return normalizeVectorONNX(embedding), nil
@@ -199,4 +319,39 @@ func CosineSimilarity(a, b []float32) float32 {
 	}
 	
 	return dot // Already normalized vectors
+}
+
+// L2Distance computes Euclidean distance between two embeddings
+func L2Distance(a, b []float32) float32 {
+	if len(a) != len(b) {
+		return float32(math.Inf(1))
+	}
+	
+	sum := float32(0)
+	for i := range a {
+		diff := a[i] - b[i]
+		sum += diff * diff
+	}
+	
+	return float32(math.Sqrt(float64(sum)))
+}
+
+// FindBestMatch finds the tile with minimum distance to the target embedding
+func FindBestMatch(target []float32, candidates []TileEmbedding) (int, float32) {
+	if len(candidates) == 0 {
+		return -1, float32(math.Inf(1))
+	}
+	
+	bestIdx := 0
+	bestDist := L2Distance(target, candidates[0].Features)
+	
+	for i := 1; i < len(candidates); i++ {
+		dist := L2Distance(target, candidates[i].Features)
+		if dist < bestDist {
+			bestDist = dist
+			bestIdx = i
+		}
+	}
+	
+	return candidates[bestIdx].TileIdx, bestDist
 }

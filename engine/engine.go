@@ -867,6 +867,8 @@ func (g *GameState) IsReaction() bool {
 }
 
 func (g *GameState) Play(a *AbilityInstance) {
+	// Emit event after ability is on the stack
+	g.Emit(EventOnStack, a.Controller, a)
 	for i := 0; i < len(a.Effects); i++ {
 		e := &a.Effects[i]
 		if e.Match != nil {
@@ -874,8 +876,6 @@ func (g *GameState) Play(a *AbilityInstance) {
 		}
 	}
 	g.stack.Add(a)
-	// Emit event after ability is on the stack
-	g.Emit(EventOnStack, a.Controller, a)
 }
 
 func (g *GameState) Pick(a *AbilityInstance, o Match, z *ZoneMatch) []any {
@@ -885,11 +885,11 @@ func (g *GameState) Pick(a *AbilityInstance, o Match, z *ZoneMatch) []any {
 			return a.Targeting
 		}
 		targeted := []int{}
-		if !a.Controller.prompt("target", 1, found, &targeted) {
-			return nil
-		}
+		for !a.Controller.prompt("target", 1, found, &targeted) {}
 		for _, i := range targeted {
-			a.Targeting = append(a.Targeting, found[i])
+			if i >= 0 && i < len(found) {
+				a.Targeting = append(a.Targeting, found[i])
+			}
 		}
 		return found
 	}
@@ -901,11 +901,11 @@ func (g *GameState) Pick(a *AbilityInstance, o Match, z *ZoneMatch) []any {
 				return a.Targeting
 			}
 			targeted := []int{}
-			if !a.Controller.prompt("target", 1, found, &targeted) {
-				return nil
-			}
+			for !a.Controller.prompt("target", 1, found, &targeted) {}
 			for _, i := range targeted {
-				a.Targeting = append(a.Targeting, found[i])
+				if i >= 0 && i < len(found) {
+					a.Targeting = append(a.Targeting, found[i])
+				}
 			}
 		}
 		return a.Targeting
@@ -1885,11 +1885,16 @@ type Prefix struct {
 
 func (c Prefix) Match(a *AbilityInstance, card *CardInstance) bool {
 	if c.Color.Value != "" {
-		if !card.HasType(c.Color.Value) {
+		// Check if card has this color (by type or by name)
+		hasColor := card.HasType(c.Color.Value) ||
+			strings.EqualFold(card.Card.Name, c.Color.Value)
+		if !hasColor {
 			return false
 		}
 	} else if c.NonColor.Value != "" {
-		if card.HasType(c.NonColor.Value) {
+		hasColor := card.HasType(c.NonColor.Value) ||
+			strings.EqualFold(card.Card.Name, c.NonColor.Value)
+		if hasColor {
 			return false
 		}
 	} else if c.NonType.Value != "" {
@@ -2036,9 +2041,12 @@ func (c CardTypeMatch) Match(a *AbilityInstance, o any) bool {
 			return false
 		}
 	} else if c.Target {
-		if !IsIn(card, a.Targeting) {
-			return false
-		}
+		// When Target is true, we're looking for valid targets
+		// The card will be added to a.Targeting after the player selects it
+		// So we don't check IsIn(card, a.Targeting) here
+		//if !IsIn(card, a.Targeting) {
+		//	return false
+		//}
 	}
 	for _, prefix := range c.Prefix {
 		if !prefix.Match(a, card) {
@@ -2343,9 +2351,12 @@ type Discard struct {
 	Value  *CardMatch `@@?`
 }
 
-func (f Discard) HasTarget() bool      { return f.Value.HasTarget() }
-func (f Discard) IsCost() bool         { return false }
-func (f Discard) Do(a *EffectInstance) { a.Match = f.Value }
+func (f Discard) HasTarget() bool { return f.Value.HasTarget() }
+func (f Discard) IsCost() bool    { return false }
+func (f Discard) Do(a *EffectInstance) {
+	a.Match = f.Value
+	a.Zone = &ZoneMatch{[]Zone{ZoneHand}}
+}
 func (f Discard) Resolve(e *EffectInstance) {
 	n := f.Number.Value(e.Ability)
 	for _, p := range e.Subjects {
@@ -2439,9 +2450,12 @@ type Activate struct {
 	Objects *CardMatch `("activate"|"activates") @@`
 }
 
-func (f Activate) HasTarget() bool      { return f.Objects.HasTarget() }
-func (f Activate) IsCost() bool         { return false }
-func (f Activate) Do(a *EffectInstance) { a.Match = f.Objects }
+func (f Activate) HasTarget() bool { return f.Objects.HasTarget() }
+func (f Activate) IsCost() bool    { return false }
+func (f Activate) Do(a *EffectInstance) {
+	a.Match = f.Objects
+	a.Zone = &ZoneMatch{[]Zone{ZoneBoard}}
+}
 func (f Activate) Resolve(e *EffectInstance) {
 	for _, c := range e.matches {
 		c.(*CardInstance).Activate()
@@ -2452,9 +2466,12 @@ type Deactivate struct {
 	Objects *CardMatch `("deactivate"|"deactivates") @@`
 }
 
-func (f Deactivate) HasTarget() bool      { return f.Objects.HasTarget() }
-func (f Deactivate) IsCost() bool         { return false }
-func (f Deactivate) Do(a *EffectInstance) { a.Match = f.Objects }
+func (f Deactivate) HasTarget() bool { return f.Objects.HasTarget() }
+func (f Deactivate) IsCost() bool    { return false }
+func (f Deactivate) Do(a *EffectInstance) {
+	a.Match = f.Objects
+	a.Zone = &ZoneMatch{[]Zone{ZoneBoard}}
+}
 func (f Deactivate) Resolve(e *EffectInstance) {
 	for _, c := range e.matches {
 		c.(*CardInstance).Deactivate()
@@ -2465,9 +2482,12 @@ type Sacrifice struct {
 	Objects *CardMatch `("sacrifice"|"sacrifices") @@`
 }
 
-func (f Sacrifice) HasTarget() bool      { return f.Objects.HasTarget() }
-func (f Sacrifice) IsCost() bool         { return false }
-func (f Sacrifice) Do(a *EffectInstance) { a.Match = f.Objects }
+func (f Sacrifice) HasTarget() bool { return f.Objects.HasTarget() }
+func (f Sacrifice) IsCost() bool    { return false }
+func (f Sacrifice) Do(a *EffectInstance) {
+	a.Match = f.Objects
+	a.Zone = &ZoneMatch{[]Zone{ZoneBoard}}
+}
 func (f Sacrifice) Resolve(e *EffectInstance) {
 	for _, c := range e.matches {
 		card := c.(*CardInstance)
@@ -2509,9 +2529,12 @@ type Damage struct {
 	Objects Match     `@@`
 }
 
-func (f Damage) HasTarget() bool      { return f.Objects.HasTarget() }
-func (f Damage) IsCost() bool         { return false }
-func (f Damage) Do(a *EffectInstance) { a.Match = f.Objects }
+func (f Damage) HasTarget() bool { return f.Objects.HasTarget() }
+func (f Damage) IsCost() bool    { return false }
+func (f Damage) Do(a *EffectInstance) {
+	a.Match = f.Objects
+	a.Zone = &ZoneMatch{[]Zone{ZoneBoard}}
+}
 func (f Damage) Resolve(e *EffectInstance) {
 	n := f.Number.Value(e.Ability)
 	for _, c := range e.matches {

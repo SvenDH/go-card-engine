@@ -39,6 +39,7 @@ node_modules/
 # Build
 dist/
 /npm-debug.log
+
 /assets
 
 # ONNX Runtime library (download separately)

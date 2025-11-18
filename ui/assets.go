@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"unicode"
     "encoding/csv"
+	"runtime"
+	"sync"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
@@ -57,9 +59,74 @@ var (
 
 	runeCharMap map[rune]int
 	reverseRunesMap map[int]rune
+
+	tileCount int
+	tilesPix [][]color.NRGBA
+	tileEmbeddings [][]float32 // Pre-computed embeddings for all tiles
+)
+
+type workerData struct {
+	s *Source
+	cell int
+	currTile int
+}
+
+// AssetEmbedder is the interface for computing embeddings during asset initialization
+type AssetEmbedder interface {
+	ComputeEmbedding(img image.Image) ([]float32, error)
+}
+
+// SetTileEmbedder computes embeddings for all tiles using the provided embedder
+func SetTileEmbedder(embedder AssetEmbedder) error {
+	if embedder == nil {
+		return nil
+	}
+	
+	log.Printf("DEBUG: SetTileEmbedder called, computing embeddings for %d tiles\n", len(tilesPix))
+	tileEmbeddings = make([][]float32, len(tilesPix))
+	successCount := 0
+	for i := range tilesPix {
+		// Create image from tile pixels
+		tileImg := image.NewRGBA(image.Rect(0, 0, TileSize, TileSize))
+		for pi, px := range tilesPix[i] {
+			x := pi % TileSize
+			y := pi / TileSize
+			tileImg.Set(x, y, px)
+		}
+		
+		embedding, err := embedder.ComputeEmbedding(tileImg)
+		if err == nil {
+			tileEmbeddings[i] = embedding
+			successCount++
+		} else {
+			log.Printf("DEBUG: Failed to compute embedding for tile %d: %v\n", i, err)
+		}
+	}
+	
+	log.Printf("DEBUG: Computed %d tile embeddings out of %d tiles\n", successCount, len(tilesPix))
+	if successCount > 0 && tileEmbeddings[0] != nil {
+		log.Printf("DEBUG: First tile embedding length: %d, first 5 values: %v\n", len(tileEmbeddings[0]), tileEmbeddings[0][:5])
+	}
+	
+	return nil
+}
+
+var (
+	jobs chan workerData
+	wg sync.WaitGroup
 )
 
 func init() {
+	workerCount := runtime.GOMAXPROCS(0)
+	if workerCount < 1 {
+		workerCount = 1
+	}
+	jobs = make(chan workerData, workerCount*2)
+	wg.Add(workerCount)
+	for i := 0; i < workerCount; i++ {
+		go worker()
+	}
+
     records, err := csv.NewReader(bytes.NewReader(paletteCSV)).ReadAll()
     if err != nil {
         log.Fatal("Unable to parse palette file as CSV", err)
@@ -156,6 +223,25 @@ func init() {
 		}
 		tileName := record[1]
 		TileIndices[tileName] = x + y * (TilesImage.Bounds().Dx() / TileSize)
+	}
+
+	tw := TilesSource.Bounds().Dx() / TileSize
+	th := TilesSource.Bounds().Dy() / TileSize
+	tileCount = tw * th
+	// Pre-extract all tiles' pixels from tilesSource into memory
+	tilesPix = make([][]color.NRGBA, tileCount)
+	for ti := range tileCount {
+		sx := (ti % tw) * TileSize
+		sy := (ti / tw) * TileSize
+		tilesPix[ti] = make([]color.NRGBA, TileSize * TileSize)
+		idx := 0
+		for y := 0; y < TileSize; y++ {
+			for x := 0; x < TileSize; x++ {
+				c := color.NRGBAModel.Convert(TilesSource.At(sx+x, sy+y)).(color.NRGBA)
+				tilesPix[ti][idx] = c
+				idx++
+			}
+		}
 	}
 }
 
