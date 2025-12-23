@@ -48,3 +48,8 @@ dist/
 # Similarity cache
 /.cache/
 /models/*
+
+.gocache/
+.gocache-local/
+
+old/

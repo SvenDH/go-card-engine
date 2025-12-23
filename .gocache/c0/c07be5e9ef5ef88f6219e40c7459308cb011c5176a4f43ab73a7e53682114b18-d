@@ -1,8 +1,0 @@
-./auth.go
-./conn.go
-./cookie.go
-./doc.go
-./help.go
-./sync.go
-./testingTools.go
-./xgb.go

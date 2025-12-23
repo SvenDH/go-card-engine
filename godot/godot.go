@@ -2,6 +2,7 @@ package godot
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"strconv"
@@ -197,9 +198,6 @@ func (c *CardGameUI) Ready() {
 	handLabel := Label.New()
 	handLabel.AsControl().SetSizeFlagsHorizontal(Control.SizeShrinkCenter)
 	handLabel.SetHorizontalAlignment(GUI.HorizontalAlignmentCenter)
-	handLabel.SetText("Hand")
-	layout.AsNode().AddChild(handLabel.AsNode())
-
 	c.handContainer = SubViewportContainer.New()
 	c.handContainer.SetStretch(true)
 	c.handContainer.AsControl().SetCustomMinimumSize(Vector2.XY{720, 240})
@@ -212,9 +210,38 @@ func (c *CardGameUI) Ready() {
 	c.handViewport.SetSize2dOverrideStretch(true)
 	c.handContainer.AsNode().AddChild(c.handViewport.AsNode())
 	c.handContainer.AsControl().OnGuiInput(func(ev InputEvent.Instance) {
+		if c.hand3d == nil || !c.hand3d.ready() {
+			return
+		}
 		if mm, ok := Object.As[InputEventMouseMotion.Instance](ev); ok {
-			if c.hand3d != nil && c.dragging == nil {
-				c.hand3d.HoverAt(mm.AsInputEventMouse().Position())
+			gpos := mm.AsInputEventMouse().GlobalPosition()
+			if c.dragging != nil {
+				if c.dragging.mesh != MeshInstance3D.Nil {
+					c.dragging.mesh.AsNode3D().SetPosition(c.mapPointerTo3D(gpos))
+				}
+				return
+			}
+			c.hand3d.HoverAt(c.viewportPosition(gpos))
+			return
+		}
+		if mb, ok := Object.As[InputEventMouseButton.Instance](ev); ok {
+			if mb.ButtonIndex() != Input.MouseButtonLeft {
+				return
+			}
+			gpos := mb.AsInputEventMouse().GlobalPosition()
+			if mb.AsInputEvent().IsPressed() {
+				if view := c.hand3d.HoverAt(c.viewportPosition(gpos)); view != nil {
+					c.dragging = view
+					view.hovered = true
+				}
+				return
+			}
+			if c.dragging != nil {
+				view := c.dragging
+				c.dragging = nil
+				view.hovered = false
+				c.dropCard3D(view, gpos)
+				c.layoutHand()
 			}
 		}
 	})
@@ -223,9 +250,9 @@ func (c *CardGameUI) Ready() {
 	layout.AsNode().AddChild(c.handContainer.AsNode())
 	c.hand3d = newHand3DScene(c, c.handViewport)
 	if c.hand3d != nil {
-		c.board3d = newBoard3DScene(c.hand3d.rootNode(), defaultBoardSlots)
+		c.board3d = newBoard3DScene(c.hand3d.rootNode(), defaultBoardSlots, c.hand3d.cardHeight)
 	}
-	c.hand = newHandScene(c, c.handArea)
+	c.hand = newHandScene(c)
 
 	go c.startGameLoop()
 }
@@ -444,35 +471,11 @@ func (c *CardGameUI) createCardView(card *engine.CardInstance, owner *engine.Pla
 		c.layoutHand()
 	})
 	btn.AsControl().OnGuiInput(func(ev InputEvent.Instance) {
-		// Start drag on left button press
+		// Only log/show card text on click; dragging handled in hand viewport input.
 		if mb, ok := Object.As[InputEventMouseButton.Instance](ev); ok {
 			if mb.ButtonIndex() == Input.MouseButtonLeft && mb.AsInputEvent().IsPressed() {
-				if view.moveTween != Tween.Nil {
-					view.moveTween.Kill()
-					view.moveTween = Tween.Nil
-				}
-				c.dragging = view
-				c.dragOffset = Vector2.Sub(mb.AsInputEventMouse().Position(), btn.AsControl().Position())
-				btn.AsCanvasItem().SetZIndex(100)
-				return
+				c.logf("%s\n%s", card.GetName(), card.Card.Text)
 			}
-			if mb.ButtonIndex() == Input.MouseButtonLeft && !mb.AsInputEvent().IsPressed() && c.dragging == view {
-				c.dragging = nil
-				btn.AsCanvasItem().SetZIndex(0)
-				view.hovered = false
-				view.homePos = btn.AsControl().Position()
-				c.dropCard3D(view)
-				c.layoutHand()
-			}
-		}
-		// Drag move
-		if mm, ok := Object.As[InputEventMouseMotion.Instance](ev); ok && c.dragging == view {
-			newPos := Vector2.Sub(mm.AsInputEventMouse().Position(), c.dragOffset)
-			btn.AsControl().SetPosition(newPos)
-			if view.mesh != MeshInstance3D.Nil {
-				view.mesh.AsNode3D().SetPosition(c.mapPointerTo3D(newPos))
-			}
-			btn.AsControl().AcceptEvent()
 		}
 	})
 	btn.AsBaseButton().OnPressed(func() {
@@ -688,27 +691,48 @@ func (c *CardGameUI) layoutHand() {
 	}
 }
 
-func (c *CardGameUI) mapPointerTo3D(pos Vector2.XY) Vector3.XYZ {
-	if c.handViewport == SubViewport.Nil {
-		return Vector3.XYZ{}
+func (c *CardGameUI) viewportPosition(global Vector2.XY) Vector2.XY {
+	if c.handContainer == SubViewportContainer.Nil || c.handViewport == SubViewport.Nil {
+		return global
 	}
-	size := c.handViewport.Size()
-	if size.X == 0 || size.Y == 0 {
-		return Vector3.XYZ{}
+	containerPos := c.handContainer.AsControl().GlobalPosition()
+	containerSize := c.handContainer.AsControl().Size()
+	vpSize := c.handViewport.Size()
+	if containerSize.X == 0 || containerSize.Y == 0 {
+		return global
 	}
-	xNorm := float64(pos.X)/float64(size.X) - 0.5
-	zNorm := float64(pos.Y) / float64(size.Y)
-	x := Float.X(xNorm * 8)
-	z := Float.X(-1.5 - zNorm*4)
-	return Vector3.XYZ{x, 0.08, z}
+	x := (global.X - containerPos.X) * Float.X(vpSize.X) / containerSize.X
+	y := (global.Y - containerPos.Y) * Float.X(vpSize.Y) / containerSize.Y
+	return Vector2.XY{x, y}
 }
 
-func (c *CardGameUI) dropCard3D(view *cardView) {
+func (c *CardGameUI) mapPointerTo3D(global Vector2.XY) Vector3.XYZ {
+	if c.hand3d == nil || !c.hand3d.ready() {
+		return Vector3.XYZ{}
+	}
+	local := c.viewportPosition(global)
+	origin := c.hand3d.camera.ProjectRayOrigin(local)
+	dir := c.hand3d.camera.ProjectRayNormal(local)
+	if math.Abs(float64(dir.Y)) < 0.0001 {
+		return origin
+	}
+	t := (Float.X(0.08) - origin.Y) / dir.Y
+	if t < 0 {
+		t = 0
+	}
+	return Vector3.XYZ{
+		origin.X + dir.X*t,
+		origin.Y + dir.Y*t,
+		origin.Z + dir.Z*t,
+	}
+}
+
+func (c *CardGameUI) dropCard3D(view *cardView, global Vector2.XY) {
 	if c.board3d == nil || c.hand == nil || view == nil {
 		return
 	}
-	pos := c.mapPointerTo3D(view.button.AsControl().Position())
-	if c.board3d.Place(view, pos) {
+	world := c.mapPointerTo3D(global)
+	if c.board3d.Place(view, world) {
 		c.hand.Detach(view)
 		return
 	}

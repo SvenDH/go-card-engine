@@ -7,24 +7,28 @@ import (
 	"graphics.gd/classdb/MeshInstance3D"
 	"graphics.gd/classdb/Node3D"
 	"graphics.gd/classdb/StandardMaterial3D"
+	"graphics.gd/variant/Angle"
 	"graphics.gd/variant/Color"
+	"graphics.gd/variant/Euler"
 	"graphics.gd/variant/Float"
 	"graphics.gd/variant/Vector3"
 )
 
 // board3DScene manages 3D board slots and positioning.
 type board3DScene struct {
-	root      Node3D.Instance
-	slots     []MeshInstance3D.Instance
-	occupied  map[int]*cardView
-	positions []Vector3.XYZ
+	root       Node3D.Instance
+	slots      []MeshInstance3D.Instance
+	occupied   map[int]*cardView
+	positions  []Vector3.XYZ
+	cardHeight Float.X
 }
 
-func newBoard3DScene(root Node3D.Instance, slotCount int) *board3DScene {
+func newBoard3DScene(root Node3D.Instance, slotCount int, cardHeight Float.X) *board3DScene {
 	scene := &board3DScene{
-		root:     root,
-		slots:    make([]MeshInstance3D.Instance, 0, slotCount),
-		occupied: make(map[int]*cardView),
+		root:       root,
+		slots:      make([]MeshInstance3D.Instance, 0, slotCount),
+		occupied:   make(map[int]*cardView),
+		cardHeight: cardHeight,
 	}
 
 	ground := MeshInstance3D.New()
@@ -99,9 +103,11 @@ func (b *board3DScene) Place(view *cardView, pos Vector3.XYZ) bool {
 	}
 
 	target := b.positions[idx]
-	target.Y = 0.08
+	// Lay the card flat on the board surface.
+	target.Y = 0.01
 
 	view.mesh.AsNode3D().SetPosition(target)
+	view.mesh.AsNode3D().SetRotation(Euler.Radians{X: Angle.Pi / 2, Y: 0, Z: 0})
 	view.location = "board"
 	view.fieldIndex = idx
 	b.occupied[idx] = view

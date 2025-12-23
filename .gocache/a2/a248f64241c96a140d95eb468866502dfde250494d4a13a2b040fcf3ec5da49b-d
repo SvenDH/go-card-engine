@@ -1,4 +1,0 @@
-./api_linux.go
-./button.go
-./gamepad.go
-./gamepad_linux.go

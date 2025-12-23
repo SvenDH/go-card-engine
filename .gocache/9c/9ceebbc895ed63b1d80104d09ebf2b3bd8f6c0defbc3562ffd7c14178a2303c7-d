@@ -1,5 +1,0 @@
-./filters.go
-./resize.go
-./rotate.go
-./shear.go
-./translate.go
