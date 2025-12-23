@@ -1,0 +1,4 @@
+./clip.go
+./embeddings.go
+./evolution.go
+./livegen.go

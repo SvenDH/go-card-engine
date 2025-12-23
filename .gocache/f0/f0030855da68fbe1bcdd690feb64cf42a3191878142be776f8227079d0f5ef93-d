@@ -1,0 +1,4 @@
+./color.go
+./model _hsl.go
+./model.go
+./names.go

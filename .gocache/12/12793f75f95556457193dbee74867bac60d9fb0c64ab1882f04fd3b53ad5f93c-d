@@ -1,0 +1,10 @@
+./bot.go
+./card.go
+./editor.go
+./game.go
+./hand.go
+./imageviewer.go
+./lanes.go
+./render.go
+./resources.go
+./stack.go

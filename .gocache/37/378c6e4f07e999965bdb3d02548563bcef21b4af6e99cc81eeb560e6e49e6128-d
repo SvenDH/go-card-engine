@@ -1,0 +1,12 @@
+./callbacks.go
+./enums.go
+./extension.go
+./handle.go
+./instance.go
+./keepalive.go
+./register_class.go
+./register_enum.go
+./register_methods.go
+./register_properties.go
+./register_signals.go
+./trampolines.go

@@ -1,0 +1,3 @@
+./easing_functions.go
+./sequence.go
+./tween.go

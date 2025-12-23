@@ -19,7 +19,7 @@ var cardsParser = engine.NewCardParser()
 var cardData []byte
 var cards []*engine.Card
 
-func init() {
+func LoadCards() {
 	var err error
 	cardData, err = os.ReadFile("assets/cards.txt")
 	if err != nil {
