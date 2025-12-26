@@ -7,8 +7,10 @@ import (
 	"graphics.gd/classdb/BaseMaterial3D"
 	"graphics.gd/classdb/Camera3D"
 	"graphics.gd/classdb/DirectionalLight3D"
+	"graphics.gd/classdb/GUI"
 	"graphics.gd/classdb/Image"
 	"graphics.gd/classdb/ImageTexture"
+	"graphics.gd/classdb/Label3D"
 	"graphics.gd/classdb/MeshInstance3D"
 	"graphics.gd/classdb/Node"
 	"graphics.gd/classdb/Node3D"
@@ -32,18 +34,38 @@ type hand3DScene struct {
 	camera   Camera3D.Instance
 	light    DirectionalLight3D.Instance
 
-	cardMat    StandardMaterial3D.Instance
-	cardTex    Texture2D.Instance
-	inHand     map[*cardView]struct{}
-	cardWidth  Float.X
-	cardHeight Float.X
-	cardDepth  Float.X
+	cardMat         StandardMaterial3D.Instance
+	cardTex         Texture2D.Instance
+	avatarMat       StandardMaterial3D.Instance
+	avatarTex       Texture2D.Instance
+	inHand          map[*cardView]struct{}
+	cardWidth       Float.X
+	cardHeight      Float.X
+	cardDepth       Float.X
+	handRaise       Float.X
+	handRaiseTarget Float.X
+	raiseStep       Float.X
+	motionLerp      Float.X
 }
 
 func loadCardTexture() Texture2D.Instance {
 	paths := []string{
 		"graphics/textures/card.png",
 		"textures/card.png",
+	}
+	for _, p := range paths {
+		if img := Image.LoadFromFile(p); img != Image.Nil {
+			tex := ImageTexture.CreateFromImage(img)
+			return tex.AsTexture2D()
+		}
+	}
+	return Texture2D.Nil
+}
+
+func loadAvatarTexture() Texture2D.Instance {
+	paths := []string{
+		"graphics/textures/avatar.png",
+		"textures/avatar.png",
 	}
 	for _, p := range paths {
 		if img := Image.LoadFromFile(p); img != Image.Nil {
@@ -63,8 +85,8 @@ func newHand3DScene(ui *CardGameUI, vp SubViewport.Instance) *hand3DScene {
 	vp.AsNode().AddChild(root.AsNode())
 
 	camera := Camera3D.New()
-	camera.AsNode3D().SetPosition(Vector3.XYZ{0, 1.6, 4})
-	camera.AsNode3D().LookAt(Vector3.XYZ{0, 0.2, 0})
+	camera.AsNode3D().SetPosition(Vector3.XYZ{0, 1.25, 4.2})
+	camera.AsNode3D().LookAt(Vector3.XYZ{0, 0.1, 0})
 	camera.SetCurrent(true)
 	root.AsNode().AddChild(camera.AsNode())
 
@@ -84,6 +106,18 @@ func newHand3DScene(ui *CardGameUI, vp SubViewport.Instance) *hand3DScene {
 		base.SetAlbedoTexture(tex)
 	}
 
+	avatarMat := StandardMaterial3D.New()
+	avatarBase := avatarMat.AsBaseMaterial3D()
+	avatarBase.SetAlbedoColor(Color.RGBA{R: 0.4, G: 0.45, B: 0.55, A: 1})
+	avatarBase.SetMetallic(0.05)
+	avatarBase.SetRoughness(0.6)
+	avatarBase.SetCullMode(BaseMaterial3D.CullDisabled)
+
+	avatarTex := loadAvatarTexture()
+	if avatarTex != Texture2D.Nil {
+		avatarBase.SetAlbedoTexture(avatarTex)
+	}
+
 	return &hand3DScene{
 		ui:         ui,
 		viewport:   vp,
@@ -92,10 +126,14 @@ func newHand3DScene(ui *CardGameUI, vp SubViewport.Instance) *hand3DScene {
 		light:      light,
 		cardMat:    mat,
 		cardTex:    tex,
+		avatarMat:  avatarMat,
+		avatarTex:  avatarTex,
 		inHand:     make(map[*cardView]struct{}),
-		cardWidth:  1.2,
-		cardHeight: 1.7,
+		cardWidth:  1.0,
+		cardHeight: 1.45,
 		cardDepth:  0.02,
+		raiseStep:  0.7,
+		motionLerp: 0.18,
 	}
 }
 
@@ -130,6 +168,37 @@ func (h *hand3DScene) ensureMesh(view *cardView) MeshInstance3D.Instance {
 	mesh.AsNode3D().SetRotation(Euler.Radians{})
 	h.root.AsNode().AddChild(mesh.AsNode())
 	view.mesh = mesh
+
+	overlay := Node3D.New()
+	overlay.AsNode3D().SetPosition(Vector3.XYZ{0, 0, 0.03})
+	mesh.AsNode().AddChild(overlay.AsNode())
+
+	avatar := MeshInstance3D.New()
+	avatarPlane := PlaneMesh.New()
+	avatarPlane.SetSize(Vector2.XY{0.55, 0.55})
+	avatarPlane.SetOrientation(PlaneMesh.FaceZ)
+	avatar.SetMesh(avatarPlane.AsMesh())
+	if h.avatarMat != StandardMaterial3D.Nil {
+		avatar.SetSurfaceOverrideMaterial(0, h.avatarMat.AsMaterial())
+	}
+	avatar.AsNode3D().SetPosition(Vector3.XYZ{0, -0.05, 0})
+	overlay.AsNode().AddChild(avatar.AsNode())
+
+	label := Label3D.New()
+	cardName := "Card"
+	if view.instance != nil {
+		cardName = view.instance.GetName()
+	}
+	label.SetText(cardName)
+	label.SetFontSize(22)
+	label.SetPixelSize(0.006)
+	label.SetHorizontalAlignment(GUI.HorizontalAlignmentCenter)
+	label.SetVerticalAlignment(GUI.VerticalAlignmentTop)
+	label.SetWidth(h.cardWidth * 0.9)
+	label.SetModulate(Color.RGBA{R: 0.95, G: 0.95, B: 0.98, A: 1})
+	label.AsNode3D().SetPosition(Vector3.XYZ{0, h.cardHeight * 0.45, 0})
+	overlay.AsNode().AddChild(label.AsNode())
+
 	return mesh
 }
 
@@ -185,27 +254,60 @@ func (h *hand3DScene) Layout() {
 	if len(cards) == 0 {
 		return
 	}
-	spacing := 1.0
+	count := float64(len(cards))
+	maxSpread := 3.6
+	spacing := 0.65
+	if len(cards) > 1 {
+		spacing = maxSpread / (count - 1)
+		if spacing > 0.85 {
+			spacing = 0.85
+		}
+		if spacing < 0.55 {
+			spacing = 0.55
+		}
+	}
 	startX := -float64(len(cards)-1) * spacing / 2
-	z := Float.X(1.2)
+	baseZ := Float.X(2.15)
+	arcZ := 0.18
+	arcY := 0.08
+	baseY := Float.X(-1.0) + h.handRaise*h.raiseStep
 	for i, view := range cards {
 		if view.mesh == MeshInstance3D.Nil {
 			continue
 		}
-		x := Float.X(startX + float64(i)*spacing)
-		y := h.cardHeight / 2
-		if view.hovered {
-			y += 0.15
+		var norm float64
+		center := (count - 1) / 2
+		if center > 0 {
+			norm = (float64(i) - center) / center
 		}
-		pos := Vector3.XYZ{x, y, z}
-		view.mesh.AsNode3D().SetPosition(pos)
+		x := Float.X(startX + float64(i)*spacing)
+		y := baseY + Float.X(arcY*(1-math.Abs(norm)))
+		z := baseZ - Float.X(arcZ*(1-math.Abs(norm)))
+		if view.hovered {
+			y += 0.2
+			z += 0.1
+		}
+		targetPos := Vector3.XYZ{x, y, z}
+		currentPos := view.mesh.AsNode3D().Position()
+		view.mesh.AsNode3D().SetPosition(lerpVec3(currentPos, targetPos, h.motionLerp))
 
-		camPos := h.camera.AsNode3D().GlobalPosition()
-		dx := float64(camPos.X - pos.X)
-		dz := float64(camPos.Z - pos.Z)
-		yaw := Float.X(math.Atan2(dx, dz))
-		view.mesh.AsNode3D().SetRotation(Euler.Radians{X: 0, Y: Angle.Radians(yaw), Z: 0})
+		targetRot := Euler.Radians{X: Angle.Radians(-0.08), Y: 0, Z: 0}
+		currentRot := view.mesh.AsNode3D().Rotation()
+		view.mesh.AsNode3D().SetRotation(lerpEuler(currentRot, targetRot, h.motionLerp))
 	}
+}
+
+func (h *hand3DScene) SetHandRaise(value Float.X) {
+	if h == nil {
+		return
+	}
+	if value < 0 {
+		value = 0
+	}
+	if value > 1 {
+		value = 1
+	}
+	h.handRaiseTarget = value
 }
 
 // HoverAt raycasts against the hand cards and returns the hovered view.
@@ -252,13 +354,13 @@ func (h *hand3DScene) HoverAt(pointer Vector2.XY) *cardView {
 		localX := hx*cy + hz*sy
 		localZ := -hx*sy + hz*cy
 
-		if math.Abs(localX) > float64(h.cardWidth)/2+0.3 {
+		if math.Abs(localX) > float64(h.cardWidth)/2+0.05 {
 			continue
 		}
-		if math.Abs(hy) > float64(h.cardHeight)/2+0.1 {
+		if math.Abs(hy) > float64(h.cardHeight)/2+0.05 {
 			continue
 		}
-		if math.Abs(localZ) > float64(h.cardDepth)/2+0.2 {
+		if math.Abs(localZ) > float64(h.cardDepth)/2+0.05 {
 			continue
 		}
 
@@ -273,4 +375,34 @@ func (h *hand3DScene) HoverAt(pointer Vector2.XY) *cardView {
 	}
 	h.Layout()
 	return hovered
+}
+
+func (h *hand3DScene) Update() {
+	if h == nil || !h.ready() {
+		return
+	}
+	if h.handRaise != h.handRaiseTarget {
+		h.handRaise = Float.X(lerpFloat(float64(h.handRaise), float64(h.handRaiseTarget), float64(h.motionLerp)))
+	}
+	h.Layout()
+}
+
+func lerpFloat(a, b, t float64) float64 {
+	return a + (b-a)*t
+}
+
+func lerpVec3(current, target Vector3.XYZ, t Float.X) Vector3.XYZ {
+	return Vector3.XYZ{
+		X: Float.X(lerpFloat(float64(current.X), float64(target.X), float64(t))),
+		Y: Float.X(lerpFloat(float64(current.Y), float64(target.Y), float64(t))),
+		Z: Float.X(lerpFloat(float64(current.Z), float64(target.Z), float64(t))),
+	}
+}
+
+func lerpEuler(current, target Euler.Radians, t Float.X) Euler.Radians {
+	return Euler.Radians{
+		X: Angle.Radians(lerpFloat(float64(current.X), float64(target.X), float64(t))),
+		Y: Angle.Radians(lerpFloat(float64(current.Y), float64(target.Y), float64(t))),
+		Z: Angle.Radians(lerpFloat(float64(current.Z), float64(target.Z), float64(t))),
+	}
 }
